@@ -1,0 +1,13 @@
+# Python
+backend/.venv/
+__pycache__/
+.pytest_cache/
+
+# Runtime data: case images, heatmaps, SQLite DB, cached Kather patches
+backend/data/
+backend/samples/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+.DS_Store
