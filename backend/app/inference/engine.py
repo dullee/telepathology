@@ -37,6 +37,19 @@ class Region:
     area_fraction: float
     max_prob: float
     mean_prob: float
+    # Centre of the most tumor-like cell in the region: the spot to zoom in on.
+    hotspot_x: int = 0
+    hotspot_y: int = 0
+
+
+@dataclass
+class Landmark:
+    """The clearest example of one tissue class, so a non-specialist can compare."""
+
+    cls: str
+    x: int
+    y: int
+    prob: float
 
 
 @dataclass
@@ -53,6 +66,7 @@ class AnalysisResult:
     tissue_fraction: float
     composition: dict[str, float]
     regions: list[Region] = field(default_factory=list)
+    landmarks: list[Landmark] = field(default_factory=list)
     tiles: int = 0
     grid_shape: tuple[int, int] = (0, 0)
     device: str = ""
@@ -149,6 +163,43 @@ def render_heatmap(tumor: np.ndarray, tissue: np.ndarray, size: tuple[int, int])
     return Image.fromarray(rgba, "RGBA")
 
 
+def _cell_centre(cy: int, cx: int, size: tuple[int, int]) -> tuple[int, int]:
+    s = config.STRIDE
+    w, h = size
+    return min(w - 1, int((cx + 0.5) * s)), min(h - 1, int((cy + 0.5) * s))
+
+
+def render_tissue_map(labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int]) -> Image.Image:
+    """RGBA overlay colouring each tissue cell by its most likely class."""
+    rgba = np.zeros((*labels.shape, 4), np.uint8)
+    for i, c in enumerate(config.CLASSES):
+        if c in config.TISSUE_COLORS:
+            m = (labels == i) & tissue
+            rgba[m, :3] = config.TISSUE_COLORS[c]
+            rgba[m, 3] = 255
+    return Image.fromarray(rgba, "RGBA").resize(size, Image.NEAREST)
+
+
+def find_landmarks(
+    grid: np.ndarray, labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int]
+) -> list[Landmark]:
+    """One confident example per tissue class, preferring cells surrounded by the same class."""
+    out = []
+    for c in config.LANDMARK_CLASSES:
+        i = config.CLASSES.index(c)
+        mask = (labels == i) & tissue
+        if not mask.any():
+            continue
+        p = np.where(mask, grid[..., i], 0)
+        score = ndimage.uniform_filter(p, size=3, mode="constant")
+        cy, cx = np.unravel_index(int(score.argmax()), score.shape)
+        if p[cy, cx] < config.LANDMARK_MIN_PROB:
+            continue
+        x, y = _cell_centre(cy, cx, size)
+        out.append(Landmark(cls=c, x=x, y=y, prob=round(float(p[cy, cx]), 3)))
+    return out
+
+
 def find_regions(
     tumor: np.ndarray, lesion: np.ndarray, tissue: np.ndarray, size: tuple[int, int]
 ) -> list[Region]:
@@ -159,12 +210,16 @@ def find_regions(
     mask = (lesion >= config.TUMOR_THRESHOLD) & tissue
     labels, _ = ndimage.label(mask, structure=np.ones((3, 3)))
     tissue_cells = max(1, int(tissue.sum()))
+    # Smoothed so the hotspot lands in the lesion's core rather than on a tied edge cell.
+    core = ndimage.uniform_filter(np.where(tissue, tumor, 0), size=3, mode="constant")
     regions = []
     for i, sl in enumerate(ndimage.find_objects(labels), start=1):
         component = labels[sl] == i
         vals = tumor[sl][component]
         if vals.max() < config.TUMOR_THRESHOLD:
             continue
+        cy, cx = np.unravel_index(int(np.where(component, core[sl], -1).argmax()), component.shape)
+        hx, hy = _cell_centre(sl[0].start + cy, sl[1].start + cx, size)
         regions.append(
             Region(
                 id=0,
@@ -175,6 +230,8 @@ def find_regions(
                 area_fraction=round(component.sum() / tissue_cells, 4),
                 max_prob=round(float(vals.max()), 3),
                 mean_prob=round(float(vals.mean()), 3),
+                hotspot_x=hx,
+                hotspot_y=hy,
             )
         )
     regions.sort(key=lambda r: (r.area_fraction, r.max_prob), reverse=True)
@@ -184,7 +241,12 @@ def find_regions(
 
 
 def analyze(
-    image_path: Path, display_path: Path, heatmap_path: Path, model, device
+    image_path: Path,
+    display_path: Path,
+    heatmap_path: Path,
+    model,
+    device,
+    tissue_map_path: Path | None = None,
 ) -> AnalysisResult:
     started = time.perf_counter()
     img = prepare_image(image_path)
@@ -219,6 +281,8 @@ def analyze(
     largest = regions[0].area_fraction if regions else 0.0
     lesion_fraction = min(1.0, sum(r.area_fraction for r in regions))
     render_heatmap(tumor, tissue, img.size).save(heatmap_path, "PNG", optimize=True)
+    if tissue_map_path:
+        render_tissue_map(labels, tissue, img.size).save(tissue_map_path, "PNG", optimize=True)
 
     score = urgency_score(max(tumor_fraction, lesion_fraction), max_tumor, largest, necrosis)
     return AnalysisResult(
@@ -234,6 +298,7 @@ def analyze(
         tissue_fraction=round(tissue_cells / tissue.size, 4),
         composition=composition,
         regions=regions,
+        landmarks=find_landmarks(grid, labels, tissue, img.size),
         tiles=len(origins),
         grid_shape=tissue.shape,
         device=describe(device),

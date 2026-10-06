@@ -22,11 +22,16 @@ queue then puts the highest-risk patients in front of remote pathologists first.
 4. **Build a probability grid**: overlapping tile predictions are averaged into 112 px cells. Background,
    fat, and the dark eyepiece vignette are masked out as non-tissue.
 5. **Find regions**: connected areas where P(tumor)+P(necrosis) ≥ 0.5 and that contain tumor. Each
-   region is reported as a bounding box in image pixels with its peak and mean probability.
+   region is reported as a bounding box in image pixels with its peak and mean probability, plus a
+   hotspot: the centre of its most tumor-like area.
 6. **Score urgency**:
    `100 × (0.5·lesion burden + 0.3·peak tumor confidence + 0.2·largest region)`, plus up to
    +10 for tumor-associated necrosis. Tiers: **Critical ≥ 70**, **High ≥ 40**, **Routine** otherwise.
    Weights and thresholds live in [`backend/app/config.py`](backend/app/config.py).
+7. **Guide the viewer**: the clearest example of each other tissue type (normal mucosa, necrosis,
+   lymphocytes, …) is saved as a landmark, and a colour-coded tissue-type map is rendered. The case
+   page's "What to look at" tour visits each hotspot and landmark and lists the visual clues to check,
+   so non-specialists can follow a demo.
 
 The model expects tissue at about 0.5 µm/px, which is roughly a 20× objective. Photograph at that
 magnification for best results.
@@ -69,7 +74,7 @@ To serve other machines on the clinic LAN, run `uvicorn ... --host 0.0.0.0` and
 | `POST` | `/api/cases/{id}/reanalyze` | Re-run analysis |
 | `GET` | `/api/health` | Device, model status |
 
-Case files are stored under `backend/data/media/<id>/` (original, display JPEG, heatmap PNG),
+Case files are stored under `backend/data/media/<id>/` (original, display JPEG, tumor heatmap PNG, tissue-type map PNG),
 with metadata in SQLite at `backend/data/telepath.db`.
 
 ## Tests

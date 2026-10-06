@@ -24,6 +24,19 @@ CLASS_LABELS = {
     "TUM": "Tumor epithelium",
 }
 NON_TISSUE = {"ADI", "BACK"}
+# Tissue-map overlay colours; keep in sync with frontend/src/lib/tissue.ts.
+TISSUE_COLORS = {
+    "TUM": (220, 38, 38),
+    "DEB": (249, 115, 22),
+    "NORM": (16, 185, 129),
+    "STR": (244, 114, 182),
+    "MUS": (253, 164, 175),
+    "LYM": (99, 102, 241),
+    "MUC": (56, 189, 248),
+}
+# Reference spots shown in the guided tour (tumor is covered by region hotspots).
+LANDMARK_CLASSES = ["DEB", "NORM", "LYM", "STR", "MUS", "MUC"]
+LANDMARK_MIN_PROB = 0.6
 
 TILE = 224
 STRIDE = int(os.getenv("TELEPATH_STRIDE", 112))

@@ -55,3 +55,21 @@ def test_small_image_is_padded(tmp_path):
     Image.fromarray(np.full((100, 150, 3), (150, 90, 160), np.uint8)).save(path)
     res = engine.analyze(path, tmp_path / "d.jpg", tmp_path / "h.png", FakeModel(), torch.device("cpu"))
     assert res.tiles == 1 and (res.width, res.height) == (150, 100)
+
+
+def test_hotspot_landmarks_and_tissue_map(synthetic, tmp_path):
+    res = engine.analyze(
+        synthetic, tmp_path / "d.jpg", tmp_path / "h.png", FakeModel(), torch.device("cpu"),
+        tissue_map_path=tmp_path / "t.png",
+    )
+    r = res.regions[0]
+    assert r.x0 <= r.hotspot_x < r.x1 and r.y0 <= r.hotspot_y < r.y1
+    # The hotspot lands inside the red block that was drawn as "tumor".
+    assert 450 <= r.hotspot_x < 850 and 100 <= r.hotspot_y < 400
+
+    stroma = [lm for lm in res.landmarks if lm.cls == "STR"]
+    assert stroma and not (450 <= stroma[0].x < 850 and 100 <= stroma[0].y < 400)
+
+    tmap = Image.open(tmp_path / "t.png")
+    assert tmap.size == (res.width, res.height) and tmap.mode == "RGBA"
+    assert tmap.getpixel((r.hotspot_x, r.hotspot_y))[:3] == config.TISSUE_COLORS["TUM"]

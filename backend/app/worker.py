@@ -34,7 +34,10 @@ def run_analysis(case_id: int) -> None:
         try:
             with _gpu_lock:
                 model, device = load_model()
-                result = analyze(d / case.filename, d / "display.jpg", d / "heatmap.png", model, device)
+                result = analyze(
+                    d / case.filename, d / "display.jpg", d / "heatmap.png", model, device,
+                    tissue_map_path=d / "tissue.png",
+                )
             case.result = result.to_dict()
             case.urgency = result.urgency
             case.tier = result.tier

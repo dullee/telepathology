@@ -24,6 +24,9 @@ def serialize(c: Case) -> dict:
     if c.result:
         data["image_url"] = f"{base}/display.jpg"
         data["heatmap_url"] = f"{base}/heatmap.png"
+        # Cases analysed before the tissue map existed don't have one until re-analysed.
+        if (config.MEDIA_DIR / str(c.id) / "tissue.png").exists():
+            data["tissue_map_url"] = f"{base}/tissue.png"
     return data
 
 

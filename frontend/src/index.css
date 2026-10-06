@@ -23,3 +23,55 @@ body {
 .reorder-move {
   transition: transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+/* Guided-tour pins on the slide viewer; --pin is the tissue colour. */
+.guide-pin {
+  position: absolute;
+  left: -13px;
+  top: -13px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  background: var(--pin);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.6);
+  cursor: pointer;
+}
+
+.guide-pin--example {
+  left: -8px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+}
+
+.guide-pin--focus::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  border: 2px solid var(--pin);
+  animation: guide-pulse 1.4s ease-out infinite;
+}
+
+@keyframes guide-pulse {
+  from {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-pin--focus::after {
+    animation: none;
+  }
+}

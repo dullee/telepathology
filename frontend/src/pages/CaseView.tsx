@@ -1,21 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { api, type CaseDetail, type Region } from '../api.ts'
+import { api, type CaseDetail } from '../api.ts'
 import { SlideViewer } from '../components/SlideViewer.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.tsx'
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
+import { buildStops, type GuideStop } from '../lib/guide.ts'
+import { tissueInfo } from '../lib/tissue.ts'
 import { usePolling } from '../lib/usePolling.ts'
-
-const CLASS_INFO: Record<string, { label: string; color: string }> = {
-  TUM: { label: 'Tumor epithelium', color: 'bg-red-600' },
-  DEB: { label: 'Debris / necrosis', color: 'bg-orange-500' },
-  NORM: { label: 'Normal mucosa', color: 'bg-emerald-500' },
-  STR: { label: 'Stroma', color: 'bg-pink-400' },
-  MUS: { label: 'Smooth muscle', color: 'bg-rose-300' },
-  LYM: { label: 'Lymphocytes', color: 'bg-indigo-500' },
-  MUC: { label: 'Mucus', color: 'bg-sky-400' },
-}
 
 const DIAGNOSES = [
   'Adenocarcinoma — confirmed',
@@ -30,7 +22,9 @@ export function CaseView() {
   const navigate = useNavigate()
   const [c, setCase] = useState<CaseDetail | null>(null)
   const [error, setError] = useState('')
-  const [focus, setFocus] = useState<Region | null>(null)
+  const [focus, setFocus] = useState<GuideStop | null>(null)
+  const result = c?.result
+  const stops = useMemo(() => (result ? buildStops(result) : []), [result])
 
   const pending = !c || c.status === 'queued' || c.status === 'analyzing'
   usePolling(
@@ -60,9 +54,10 @@ export function CaseView() {
           <SlideViewer
             imageUrl={c.image_url}
             heatmapUrl={c.heatmap_url}
+            tissueMapUrl={c.tissue_map_url}
             width={r.width}
             height={r.height}
-            regions={r.regions}
+            stops={stops}
             focus={focus}
             onSelect={setFocus}
           />
@@ -134,38 +129,13 @@ export function CaseView() {
                 </p>
               </div>
 
-              <section>
-                <h2 className="mb-2 text-sm font-semibold">Suspicious regions</h2>
-                {r.regions.length === 0 ? (
-                  <p className="text-sm text-slate-500">No region above the tumor threshold.</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {r.regions.map((reg) => (
-                      <li key={reg.id}>
-                        <button
-                          onClick={() => setFocus(reg)}
-                          className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${
-                            focus?.id === reg.id
-                              ? 'bg-cyan-700 text-white'
-                              : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <span className="font-medium">Region {reg.id}</span>
-                          <span className="tabular-nums opacity-80">
-                            peak {pct(reg.max_prob)} · {pct(reg.area_fraction, 1)}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+              <GuideTour stops={stops} focus={focus} onSelect={setFocus} hasRegions={r.regions.length > 0} />
 
               <section>
                 <h2 className="mb-2 text-sm font-semibold">Tissue composition</h2>
                 <div className="mb-2 flex h-3 overflow-hidden rounded-full">
                   {Object.entries(r.composition).map(([k, v]) => (
-                    <div key={k} className={CLASS_INFO[k]?.color ?? 'bg-slate-400'} style={{ width: `${v * 100}%` }} title={k} />
+                    <div key={k} style={{ width: `${v * 100}%`, backgroundColor: tissueInfo(k).color }} title={tissueInfo(k).label} />
                   ))}
                 </div>
                 <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
@@ -173,8 +143,8 @@ export function CaseView() {
                     .sort((a, b) => b[1] - a[1])
                     .map(([k, v]) => (
                       <li key={k} className="flex items-center gap-1.5">
-                        <span className={`size-2 rounded-sm ${CLASS_INFO[k]?.color ?? 'bg-slate-400'}`} />
-                        <span className="flex-1 truncate text-slate-600 dark:text-slate-300">{CLASS_INFO[k]?.label ?? k}</span>
+                        <span className="size-2 rounded-sm" style={{ backgroundColor: tissueInfo(k).color }} />
+                        <span className="flex-1 truncate text-slate-600 dark:text-slate-300">{tissueInfo(k).label}</span>
                         <span className="tabular-nums text-slate-500">{pct(v)}</span>
                       </li>
                     ))}
@@ -189,6 +159,101 @@ export function CaseView() {
         </div>
       </aside>
     </main>
+  )
+}
+
+function GuideTour({
+  stops,
+  focus,
+  onSelect,
+  hasRegions,
+}: {
+  stops: GuideStop[]
+  focus: GuideStop | null
+  onSelect: (s: GuideStop) => void
+  hasRegions: boolean
+}) {
+  const i = focus ? stops.findIndex((s) => s.key === focus.key) : -1
+  const info = focus ? tissueInfo(focus.cls) : null
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold">What to look at</h2>
+      <p className="mb-2 mt-0.5 text-xs text-slate-500">
+        {hasRegions ? 'Numbered pins mark the most suspicious spots. ' : 'No region crossed the tumor threshold. '}
+        Small dots mark reference examples of other tissue. The AI judges small squares of tissue, not single cells,
+        so check the clues inside the dashed circle.
+      </p>
+
+      {focus && info ? (
+        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-semibold">{focus.title}</h3>
+            <span className="text-xs tabular-nums text-slate-500">
+              {i + 1} of {stops.length}
+            </span>
+          </div>
+          <p className="mt-1 flex items-center gap-1.5 text-xs">
+            <span className="size-2.5 rounded-sm" style={{ backgroundColor: info.color }} />
+            AI reads this as <strong>{info.label}</strong> · {pct(focus.prob)} confident
+          </p>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{info.what}</p>
+          <h4 className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Look for</h4>
+          <ul className="mt-1 list-disc space-y-1 pl-4 text-sm">
+            {info.lookFor.map((clue) => (
+              <li key={clue}>{clue}</li>
+            ))}
+          </ul>
+          {focus.cls === 'TUM' && stops.some((s) => s.cls === 'NORM') && (
+            <p className="mt-2 text-xs text-slate-500">Tip: jump to the normal mucosa example to compare the two.</p>
+          )}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              disabled={i <= 0}
+              onClick={() => onSelect(stops[i - 1])}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700"
+            >
+              ← Previous
+            </button>
+            <button
+              disabled={i >= stops.length - 1}
+              onClick={() => onSelect(stops[i + 1])}
+              className="rounded-md bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-40"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      ) : (
+        stops.length > 0 && (
+          <button
+            onClick={() => onSelect(stops[0])}
+            className="w-full rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800"
+          >
+            Start guided tour ({stops.length} stops)
+          </button>
+        )
+      )}
+
+      <ol className="mt-2 space-y-1">
+        {stops.map((s) => (
+          <li key={s.key}>
+            <button
+              onClick={() => onSelect(s)}
+              className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
+                focus?.key === s.key
+                  ? 'bg-cyan-700 text-white'
+                  : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: tissueInfo(s.cls).color }} />
+              <span className="flex-1 truncate font-medium">{s.title}</span>
+              <span className="tabular-nums opacity-80">{pct(s.prob)}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 

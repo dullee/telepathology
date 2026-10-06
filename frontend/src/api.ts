@@ -10,6 +10,16 @@ export interface Region {
   area_fraction: number
   max_prob: number
   mean_prob: number
+  /** Missing on cases analysed before hotspots existed. */
+  hotspot_x?: number
+  hotspot_y?: number
+}
+
+export interface Landmark {
+  cls: string
+  x: number
+  y: number
+  prob: number
 }
 
 export interface AnalysisResult {
@@ -25,6 +35,7 @@ export interface AnalysisResult {
   tissue_fraction: number
   composition: Record<string, number>
   regions: Region[]
+  landmarks?: Landmark[]
   tiles: number
   device: string
   elapsed_ms: number
@@ -47,6 +58,7 @@ interface CaseBase {
   original_url: string
   image_url?: string
   heatmap_url?: string
+  tissue_map_url?: string
 }
 
 export interface CaseSummary extends CaseBase {
