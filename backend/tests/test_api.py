@@ -5,7 +5,8 @@ import torch
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.inference import model as model_mod
+from app.inference import model as model_mgr
+from app.inference.registry import get_profile
 from tests.test_engine import FakeModel
 
 
@@ -19,10 +20,9 @@ def _jpeg(color):
 
 
 def test_upload_analyze_queue_review(monkeypatch):
-    fake = (FakeModel(), torch.device("cpu"))
-    monkeypatch.setattr(model_mod, "load_model", lambda: fake)
+    fake = model_mgr.Loaded(get_profile("resnet18-kather100k"), FakeModel(), torch.device("cpu"))
     monkeypatch.setattr("app.worker.load_model", lambda: fake)
-    monkeypatch.setattr("app.main.load_model", lambda: fake)
+    monkeypatch.setattr(model_mgr, "warm", lambda: None)
     from app.main import app
 
     with TestClient(app) as client:
@@ -36,6 +36,8 @@ def test_upload_analyze_queue_review(monkeypatch):
         detail = client.get(f"/api/cases/{high.json()['id']}").json()
         assert detail["status"] == "ready"
         assert detail["result"]["regions"]
+        assert detail["result"]["model"] == "resnet18-kather100k"
+        assert detail["result"]["model"] == "resnet18-kather100k"
         assert client.get(detail["heatmap_url"]).status_code == 200
 
         queue = client.get("/api/cases?status=active").json()
@@ -48,7 +50,8 @@ def test_upload_analyze_queue_review(monkeypatch):
         assert "P-HIGH" not in [c["patient_ref"] for c in active]
 
 
-def test_rejects_non_images():
+def test_rejects_non_images(monkeypatch):
+    monkeypatch.setattr(model_mgr, "warm", lambda: None)
     from app.main import app
 
     with TestClient(app) as client:

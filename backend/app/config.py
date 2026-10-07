@@ -8,6 +8,7 @@ DATA_DIR = Path(os.getenv("TELEPATH_DATA_DIR", BASE_DIR / "data"))
 MEDIA_DIR = DATA_DIR / "media"
 DB_URL = os.getenv("TELEPATH_DB_URL", f"sqlite:///{DATA_DIR / 'telepath.db'}")
 
+# Default classifier until one is picked in the dashboard. Options: app/inference/registry.py.
 MODEL_NAME = os.getenv("TELEPATH_MODEL", "resnet18-kather100k")
 # Output index order of the TIAToolbox kather100k weights
 # (tiatoolbox.models.dataset.info.KatherPatchDataset) -- not alphabetical.

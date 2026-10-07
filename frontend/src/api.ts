@@ -28,6 +28,12 @@ export interface AnalysisResult {
   tiles: number
   device: string
   elapsed_ms: number
+  model?: string
+  model_label?: string
+  organ?: string
+  /** Class code -> display label for the model that produced this result (absent on old results). */
+  class_labels?: Record<string, string>
+  tumor_classes?: string[]
 }
 
 interface CaseBase {
@@ -61,9 +67,38 @@ export interface CaseDetail extends CaseBase {
 export interface Health {
   device: string
   model: string
+  model_label: string
   model_ready: boolean
   model_error: string
   classes: Record<string, string>
+}
+
+export interface ModelInfo {
+  id: string
+  label: string
+  organ: string
+  family: 'cnn' | 'foundation'
+  description: string
+  license: string
+  params: string
+  speed: 'fast' | 'medium' | 'slow'
+  download_gb: number
+  trained_on: string
+  classes: Record<string, string>
+  tumor_classes: string[]
+  validation: { val_accuracy?: number; val_accuracy_degraded?: number }
+  available: boolean
+  unavailable_reason: string
+  weights_cached: boolean
+}
+
+export interface ModelStatus {
+  active: string
+  /** Model currently in memory; differs from `active` while a switch is loading. */
+  loaded: string
+  loading: string
+  error: string
+  models: ModelInfo[]
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -85,6 +120,13 @@ export const api = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    }),
+  models: () => request<ModelStatus>('/api/models'),
+  setModel: (id: string) =>
+    request<ModelStatus>('/api/models/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
     }),
   reanalyze: (id: number) => request<CaseDetail>(`/api/cases/${id}/reanalyze`, { method: 'POST' }),
 }

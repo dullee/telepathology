@@ -19,11 +19,8 @@ from scipy import ndimage
 
 from app import config
 from app.inference.device import describe
+from app.inference.registry import KATHER, ClassSpec
 from app.inference.scoring import tier_for, urgency_score
-
-TUM = config.CLASSES.index("TUM")
-DEB = config.CLASSES.index("DEB")
-NON_TISSUE_IDX = [config.CLASSES.index(c) for c in config.NON_TISSUE]
 
 
 @dataclass
@@ -184,8 +181,12 @@ def find_regions(
 
 
 def analyze(
-    image_path: Path, display_path: Path, heatmap_path: Path, model, device
+    image_path: Path, display_path: Path, heatmap_path: Path, model, device, spec: ClassSpec = KATHER
 ) -> AnalysisResult:
+    """`spec` says which of the model's output classes are tumor / necrosis / non-tissue."""
+    idx = {c: i for i, c in enumerate(spec.classes)}
+    tumor_idx = [idx[c] for c in spec.tumor]
+    necrosis_idx = [idx[c] for c in spec.necrosis]
     started = time.perf_counter()
     img = prepare_image(image_path)
     img.save(display_path, "JPEG", quality=90)
@@ -195,27 +196,30 @@ def analyze(
     grid = probability_grid(probs, origins, img.height, img.width)
 
     labels = grid.argmax(axis=2)
-    tissue = pixel_tissue_mask(np.asarray(img), grid.shape[:2]) & ~np.isin(labels, NON_TISSUE_IDX)
+    non_tissue_idx = [idx[c] for c in spec.non_tissue]
+    tissue = pixel_tissue_mask(np.asarray(img), grid.shape[:2]) & ~np.isin(labels, non_tissue_idx)
     tissue_cells = int(tissue.sum())
-    tumor = grid[..., TUM]
+    # Several tumor classes (e.g. lung adenocarcinoma + squamous) add up to one P(tumor).
+    tumor = grid[..., tumor_idx].sum(axis=2)
+    necrotic = grid[..., necrosis_idx].sum(axis=2)
 
     if tissue_cells:
         tumor_fraction = float(((tumor >= config.TUMOR_THRESHOLD) & tissue).sum() / tissue_cells)
         # Smoothed so one noisy cell can't dominate the score.
         smooth = ndimage.uniform_filter(np.where(tissue, tumor, 0), size=3, mode="constant")
         max_tumor = float(smooth[tissue].max())
-        necrosis = float(((labels == DEB) & tissue).sum() / tissue_cells)
+        necrosis = float((np.isin(labels, necrosis_idx) & tissue).sum() / tissue_cells)
         mean_probs = grid[tissue].mean(axis=0)
         composition = {
             c: round(float(v), 4)
-            for c, v in zip(config.CLASSES, mean_probs / mean_probs.sum())
-            if c not in config.NON_TISSUE
+            for c, v in zip(spec.classes, mean_probs / mean_probs.sum())
+            if c not in spec.non_tissue
         }
     else:
         tumor_fraction = max_tumor = necrosis = 0.0
         composition = {}
 
-    regions = find_regions(tumor, tumor + grid[..., DEB], tissue, img.size)
+    regions = find_regions(tumor, tumor + necrotic, tissue, img.size)
     largest = regions[0].area_fraction if regions else 0.0
     lesion_fraction = min(1.0, sum(r.area_fraction for r in regions))
     render_heatmap(tumor, tissue, img.size).save(heatmap_path, "PNG", optimize=True)

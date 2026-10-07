@@ -7,14 +7,34 @@ import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.t
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
 import { usePolling } from '../lib/usePolling.ts'
 
-const CLASS_INFO: Record<string, { label: string; color: string }> = {
-  TUM: { label: 'Tumor epithelium', color: 'bg-red-600' },
-  DEB: { label: 'Debris / necrosis', color: 'bg-orange-500' },
-  NORM: { label: 'Normal mucosa', color: 'bg-emerald-500' },
-  STR: { label: 'Stroma', color: 'bg-pink-400' },
-  MUS: { label: 'Smooth muscle', color: 'bg-rose-300' },
-  LYM: { label: 'Lymphocytes', color: 'bg-indigo-500' },
-  MUC: { label: 'Mucus', color: 'bg-sky-400' },
+// Colorectal labels for results saved before models carried their own class_labels.
+const KATHER_LABELS: Record<string, string> = {
+  TUM: 'Tumor epithelium',
+  DEB: 'Debris / necrosis',
+  NORM: 'Normal mucosa',
+  STR: 'Stroma',
+  MUS: 'Smooth muscle',
+  LYM: 'Lymphocytes',
+  MUC: 'Mucus',
+}
+
+const CLASS_COLOR: Record<string, string> = {
+  TUM: 'bg-red-600',
+  ACA: 'bg-red-600',
+  SCC: 'bg-fuchsia-700',
+  DEB: 'bg-orange-500',
+  NEC: 'bg-orange-500',
+  NORM: 'bg-emerald-500',
+  NOR: 'bg-emerald-500',
+  STR: 'bg-pink-400',
+  FIB: 'bg-pink-400',
+  MUS: 'bg-rose-300',
+  LYM: 'bg-indigo-500',
+  INF: 'bg-indigo-500',
+  MUC: 'bg-sky-400',
+  ADI: 'bg-yellow-200',
+  STE: 'bg-yellow-300',
+  REA: 'bg-teal-500',
 }
 
 const DIAGNOSES = [
@@ -53,6 +73,8 @@ export function CaseView() {
   if (!c) return <main className="p-8 text-center text-slate-500">Loading case…</main>
 
   const r = c.result
+  const classLabels = r?.class_labels ?? KATHER_LABELS
+  const classColor = (k: string) => CLASS_COLOR[k] ?? 'bg-slate-400'
   return (
     <main className="grid flex-1 lg:h-[calc(100vh-3.5rem)] lg:grid-cols-[1fr_380px]">
       <section className="relative h-[60vh] min-h-80 bg-slate-950 lg:h-auto">
@@ -129,8 +151,15 @@ export function CaseView() {
                   <dd className="text-right tabular-nums">{pct(r.necrosis_fraction)}</dd>
                 </dl>
                 <p className="mt-3 text-xs text-slate-500">
-                  Triage aid only — the specialist makes the diagnosis. {r.tiles} tiles · {r.device} ·{' '}
-                  {(r.elapsed_ms / 1000).toFixed(1)} s
+                  Triage aid only — the specialist makes the diagnosis. {r.model_label ?? 'ResNet-18 · Kather100k'} ·{' '}
+                  {r.tiles} tiles · {r.device} · {(r.elapsed_ms / 1000).toFixed(1)} s ·{' '}
+                  <button
+                    onClick={() => api.reanalyze(c.id).then(setCase)}
+                    className="text-cyan-700 hover:underline dark:text-cyan-400"
+                    title="Run again with the model currently selected in the header"
+                  >
+                    Re-analyze
+                  </button>
                 </p>
               </div>
 
@@ -165,7 +194,7 @@ export function CaseView() {
                 <h2 className="mb-2 text-sm font-semibold">Tissue composition</h2>
                 <div className="mb-2 flex h-3 overflow-hidden rounded-full">
                   {Object.entries(r.composition).map(([k, v]) => (
-                    <div key={k} className={CLASS_INFO[k]?.color ?? 'bg-slate-400'} style={{ width: `${v * 100}%` }} title={k} />
+                    <div key={k} className={classColor(k)} style={{ width: `${v * 100}%` }} title={classLabels[k] ?? k} />
                   ))}
                 </div>
                 <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
@@ -173,8 +202,10 @@ export function CaseView() {
                     .sort((a, b) => b[1] - a[1])
                     .map(([k, v]) => (
                       <li key={k} className="flex items-center gap-1.5">
-                        <span className={`size-2 rounded-sm ${CLASS_INFO[k]?.color ?? 'bg-slate-400'}`} />
-                        <span className="flex-1 truncate text-slate-600 dark:text-slate-300">{CLASS_INFO[k]?.label ?? k}</span>
+                        <span className={`size-2 shrink-0 rounded-sm ${classColor(k)}`} />
+                        <span className="flex-1 truncate text-slate-600 dark:text-slate-300" title={classLabels[k] ?? k}>
+                          {classLabels[k] ?? k}
+                        </span>
                         <span className="tabular-nums text-slate-500">{pct(v)}</span>
                       </li>
                     ))}

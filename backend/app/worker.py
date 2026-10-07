@@ -1,18 +1,16 @@
 """Runs analysis outside the request cycle. One job at a time: a single consumer GPU."""
 
 import logging
-import threading
 
 from sqlmodel import Session
 
 from app import config
 from app.db import engine
 from app.inference.engine import analyze
-from app.inference.model import load_model
+from app.inference.model import GPU_LOCK, load_model
 from app.models import Case, utcnow
 
 log = logging.getLogger(__name__)
-_gpu_lock = threading.Lock()
 
 
 def case_dir(case_id: int):
@@ -32,10 +30,20 @@ def run_analysis(case_id: int) -> None:
 
         d = case_dir(case_id)
         try:
-            with _gpu_lock:
-                model, device = load_model()
-                result = analyze(d / case.filename, d / "display.jpg", d / "heatmap.png", model, device)
-            case.result = result.to_dict()
+            with GPU_LOCK:
+                loaded = load_model()
+                p = loaded.profile
+                result = analyze(
+                    d / case.filename, d / "display.jpg", d / "heatmap.png", loaded.model, loaded.device, p.spec
+                )
+            case.result = {
+                **result.to_dict(),
+                "model": p.id,
+                "model_label": p.label,
+                "organ": p.organ,
+                "class_labels": p.spec.labels,
+                "tumor_classes": list(p.spec.tumor),
+            }
             case.urgency = result.urgency
             case.tier = result.tier
             case.status = "ready"

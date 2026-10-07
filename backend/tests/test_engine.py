@@ -55,3 +55,24 @@ def test_small_image_is_padded(tmp_path):
     Image.fromarray(np.full((100, 150, 3), (150, 90, 160), np.uint8)).save(path)
     res = engine.analyze(path, tmp_path / "d.jpg", tmp_path / "h.png", FakeModel(), torch.device("cpu"))
     assert res.tiles == 1 and (res.width, res.height) == (150, 100)
+
+
+class FakeLungModel(torch.nn.Module):
+    """Splits red tiles' tumor mass across both carcinoma classes, so neither alone passes 0.5."""
+
+    def forward(self, x):
+        red = (x[:, 0].mean(dim=(1, 2)) > 0.7).float()
+        p = torch.zeros(x.shape[0], 3)  # NOR, ACA, SCC
+        p[:, 0] = 1 - red
+        p[:, 1] = 0.45 * red
+        p[:, 2] = 0.55 * red
+        return p
+
+
+def test_spec_with_two_tumor_classes(synthetic, tmp_path):
+    from app.inference.registry import LUNG
+
+    res = engine.analyze(synthetic, tmp_path / "d.jpg", tmp_path / "h.png", FakeLungModel(), torch.device("cpu"), LUNG)
+    assert set(res.composition) == {"NOR", "ACA", "SCC"}
+    assert res.regions and res.max_tumor_prob > 0.9, "ACA + SCC should add up to one tumor signal"
+    assert res.necrosis_fraction == 0
