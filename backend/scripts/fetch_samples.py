@@ -10,6 +10,7 @@ hand). They are uploaded as several photos so the server stitches them (samples/
 
     uv run python scripts/fetch_samples.py            # writes samples/*.jpg
     uv run python scripts/fetch_samples.py --seed     # ...and uploads them to the running API
+    uv run python scripts/fetch_samples.py --seed --only mosaic   # upload just the stitched cases
 """
 
 from __future__ import annotations
@@ -178,6 +179,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", action="store_true", help="upload samples to the API")
     ap.add_argument("--api", default="http://localhost:8000")
+    ap.add_argument("--only", choices=["all", "single", "mosaic"], default="all",
+                    help="which cases to upload with --seed (all are still written)")
     args = ap.parse_args()
 
     patches = fetch_patches()
@@ -203,7 +206,11 @@ def main() -> None:
         written.append((paths, case))
         print(f"wrote {folder.relative_to(ROOT)}/ ({len(paths)} photos)")
     if args.seed:
-        seed(args.api, written)
+        # Everything is built either way so the random draws, and thus the images, stay the same.
+        stitched = {c[0] for c in MOSAIC_CASES}
+        keep = {"all": lambda name: True, "single": lambda name: name not in stitched,
+                "mosaic": lambda name: name in stitched}[args.only]
+        seed(args.api, [(paths, case) for paths, case in written if keep(case[0])])
 
 
 if __name__ == "__main__":

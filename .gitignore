@@ -5,7 +5,8 @@ __pycache__/
 
 # Runtime data: case images, heatmaps, SQLite DB, cached Kather patches
 backend/data/
-backend/samples/
+# Large third-party downloads (the generated demo photos in backend/samples are committed)
+backend/samples/plism/
 
 # Node
 frontend/node_modules/
