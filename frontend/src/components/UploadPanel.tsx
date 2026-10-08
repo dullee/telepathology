@@ -1,39 +1,58 @@
-import { useRef, useState, type DragEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 
 import { api } from '../api.ts'
 
+const MAX_PHOTOS = 40
+
 export function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
+  const [files, setFiles] = useState<File[]>([])
+  const [previews, setPreviews] = useState<string[]>([])
   const [patient, setPatient] = useState('')
-  const [clinic, setClinic] = useState(() => localStorage.getItem('clinic') ?? '')
+  const [clinic, setClinic] = useState(() => {
+    try {
+      return localStorage.getItem('clinic') ?? ''
+    } catch {
+      return ''
+    }
+  })
   const [specimen, setSpecimen] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
   const input = useRef<HTMLInputElement>(null)
 
-  function pick(f: File | undefined) {
-    if (!f) return
-    if (preview) URL.revokeObjectURL(preview)
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
-    setError('')
+  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews])
+
+  /** Photos accumulate, so a phone user can capture one field at a time. */
+  function add(list: FileList | null | undefined) {
+    const picked = [...(list ?? [])].filter((f) => f.type.startsWith('image/'))
+    if (!picked.length) return
+    const next = [...files, ...picked].slice(0, MAX_PHOTOS)
+    setFiles(next)
+    setPreviews(next.map((f) => URL.createObjectURL(f)))
+    setError(files.length + picked.length > MAX_PHOTOS ? `Up to ${MAX_PHOTOS} photos per case.` : '')
+  }
+
+  function remove(i: number) {
+    const next = files.filter((_, j) => j !== i)
+    setFiles(next)
+    setPreviews(next.map((f) => URL.createObjectURL(f)))
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault()
     setDragging(false)
-    pick(e.dataTransfer.files[0])
+    add(e.dataTransfer.files)
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    if (!file || !patient.trim()) return
+    if (!files.length || !patient.trim()) return
     setBusy(true)
     setError('')
     const form = new FormData()
-    form.append('image', file)
+    if (files.length === 1) form.append('image', files[0])
+    else files.forEach((f) => form.append('images', f))
     form.append('patient_ref', patient)
     form.append('clinic', clinic)
     form.append('specimen', specimen)
@@ -44,9 +63,8 @@ export function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
       } catch {
         /* storage unavailable */
       }
-      if (preview) URL.revokeObjectURL(preview)
-      setFile(null)
-      setPreview(null)
+      setFiles([])
+      setPreviews([])
       setPatient('')
       setSpecimen('')
       onUploaded()
@@ -73,18 +91,25 @@ export function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={`relative flex aspect-[4/3] cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed text-center text-sm transition ${
+        className={`relative flex cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed text-center text-sm transition ${
+          files.length ? 'py-3' : 'aspect-[4/3]'
+        } ${
           dragging
             ? 'border-cyan-600 bg-cyan-50 dark:bg-cyan-950/30'
             : 'border-slate-300 hover:border-cyan-600 dark:border-slate-700'
         }`}
       >
-        {preview ? (
-          <img src={preview} alt="Selected slide" className="absolute inset-0 size-full object-cover" />
+        {files.length === 1 ? (
+          <img src={previews[0]} alt="Selected slide" className="max-h-56 rounded object-contain" />
+        ) : files.length > 1 ? (
+          <span className="px-4 font-medium text-slate-700 dark:text-slate-200">+ Add more photos</span>
         ) : (
           <div className="px-4 text-slate-500">
-            <div className="font-medium text-slate-700 dark:text-slate-200">Drop a slide photo here</div>
-            <div className="mt-1 text-xs">or tap to choose · JPEG, PNG, TIFF · up to 40 MB</div>
+            <div className="font-medium text-slate-700 dark:text-slate-200">Drop slide photos here</div>
+            <div className="mt-1 text-xs">or tap to choose · JPEG, PNG, TIFF · up to 40 MB each</div>
+            <div className="mt-2 text-xs">
+              One photo, or several overlapping photos of the same slide (about ⅓ overlap) to stitch into one image.
+            </div>
           </div>
         )}
         <input
@@ -92,20 +117,58 @@ export function UploadPanel({ onUploaded }: { onUploaded: () => void }) {
           type="file"
           accept="image/*"
           capture="environment"
+          multiple
           className="hidden"
-          onChange={(e) => pick(e.target.files?.[0])}
+          onChange={(e) => {
+            add(e.target.files)
+            e.target.value = '' // allow picking the same file again
+          }}
         />
       </div>
+
+      {files.length > 1 && (
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-xs text-slate-500">
+            <span>{files.length} photos · will be stitched into one image</span>
+            <button
+              type="button"
+              onClick={() => {
+                setFiles([])
+                setPreviews([])
+              }}
+              className="hover:text-red-600"
+            >
+              Clear
+            </button>
+          </div>
+          <ul className="grid grid-cols-4 gap-1.5 sm:grid-cols-5">
+            {previews.map((src, i) => (
+              <li key={src} className="group relative aspect-square overflow-hidden rounded bg-slate-900">
+                <img src={src} alt={`Photo ${i + 1}`} className="size-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  aria-label={`Remove photo ${i + 1}`}
+                  className="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-black/70 text-xs text-white opacity-80 hover:opacity-100"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <input className={field} placeholder="Patient / specimen ID *" value={patient} onChange={(e) => setPatient(e.target.value)} required />
       <input className={field} placeholder="Clinic" value={clinic} onChange={(e) => setClinic(e.target.value)} />
       <input className={field} placeholder="Specimen type (e.g. colon biopsy)" value={specimen} onChange={(e) => setSpecimen(e.target.value)} />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button
         type="submit"
-        disabled={!file || !patient.trim() || busy}
+        disabled={!files.length || !patient.trim() || busy}
         className="w-full rounded-md bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {busy ? 'Uploading…' : 'Submit for AI triage'}
+        {busy ? 'Uploading…' : files.length > 1 ? `Stitch ${files.length} photos & submit` : 'Submit for AI triage'}
       </button>
     </form>
   )

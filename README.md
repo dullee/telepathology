@@ -14,6 +14,11 @@ queue then puts the highest-risk patients in front of remote pathologists first.
 
 ## How the analysis works
 
+0. **Check photo quality**: before any model runs, each photo is graded for focus, exposure, tissue in
+   view, H&E staining and resolution (see [Photo quality gate](#photo-quality-gate)). Unusable photos ask the
+   clinic for a retake.
+0. **Stitch (several photos)**: overlapping photos of one slide are aligned and blended into a single mosaic
+   (see [Stitching](#stitching-several-photos)). A single photo skips this step.
 1. **Normalize the photo**: apply EXIF rotation, convert to RGB, and cap the longest side at 2048 px (`TELEPATH_MAX_SIDE`).
 2. **Tile**: cut 224 px tiles at a 112 px stride (50% overlap).
 3. **Classify**: the active model (default: TIAToolbox's `resnet18-kather100k`; see [Models](#models))
@@ -29,8 +34,74 @@ queue then puts the highest-risk patients in front of remote pathologists first.
    +10 for tumor-associated necrosis. Tiers: **Critical ≥ 70**, **High ≥ 40**, **Routine** otherwise.
    Weights and thresholds live in [`backend/app/config.py`](backend/app/config.py).
 
+7. **Count cells** (after the case is already in the queue): HoVer-Net finds and types every nucleus
+   (see [Cell counting](#cell-counting)).
+
 The model expects tissue at about 0.5 µm/px, which is roughly a 20× objective. Photograph at that
 magnification for best results.
+
+### Photo quality gate
+
+[`quality.py`](backend/app/inference/quality.py) grades each photo before analysis.
+
+| Check | Warn | Reject (retake) |
+| --- | --- | --- |
+| Focus (median over tissue tiles of var(Laplacian) / var(gray)) | < 1.5 (cell types unreliable) | < 0.4 (about 1.5–2 px of blur) |
+| Brightness of the lit field | < 90 | < 55 |
+| Overexposed (clipped) share | > 35% | > 70% |
+| Tissue in view | < 15% | < 3% |
+| H&E colouring of tissue pixels | < 50% | < 20% |
+| Longest side | < 1000 px | < 224 px |
+
+The focus thresholds were calibrated on LungHist700 microscope-camera photos with added blur: sharp photos
+score about 3.2, a 0.8 px blur about 1.3, and a 1.6 px blur about 0.3.
+
+- **Reject:** the case becomes **Retake photo** and isn't analysed. The case page explains what to fix,
+  and a reviewer can still choose **Analyse anyway**.
+- **Warn:** the case is analysed and the warnings are shown above the score.
+- **Several photos:** each is checked before stitching. Rejected ones are left out and listed with the
+  reason. The report is saved per case as `quality.json`.
+
+### Stitching several photos
+
+Drop several photos into the upload panel; on a phone, they can be added one at a time. Move the stage
+about two-thirds of a field between shots so each photo overlaps its neighbours by about a third, and keep
+the same objective and focus. [`stitch.py`](backend/app/inference/stitch.py) works as follows:
+
+- It masks the dark eyepiece ring in each photo.
+- It matches SIFT features between every pair of photos and fits shift + rotation + scale with RANSAC.
+- It chains the photos along the strongest matches and blends them, with weights that fade to zero at each
+  field's edge, so the ring and seams don't show.
+
+Photos that don't overlap anything are left out, and the case page reports this ("Stitched from 5 of 6
+photos"). If nothing lines up, the case fails with capture guidance. The mosaic is analysed at full
+resolution, up to 12,000 px (`TELEPATH_MOSAIC_MAX_SIDE`), with at most 40 photos per case. The result is a
+stitched panorama at one magnification, not a multi-resolution scanner WSI.
+
+### Cell counting
+
+[`cells.py`](backend/app/inference/cells.py) runs TIAToolbox's `hovernet_fast-pannuke` and reports:
+- nuclei counted and typed as neoplastic, inflammatory, connective, dead or benign epithelial
+- % neoplastic
+- nuclei per mm² of tissue
+- an overlay of every nucleus in the viewer (Cells toggle)
+
+It runs as a second stage, so the urgency score is never delayed. Set `TELEPATH_CELLS=0` to turn it off.
+The GPU is shared triage-first: cell counting takes it one chunk at a time and steps aside whenever a newly
+uploaded case is waiting to be scored. Cases interrupted by a restart or power cut are resumed when the
+backend starts again.
+
+- **Scale:** HoVer-Net was trained at 0.25 µm/px (40×), so photos are upscaled 2× from the assumed
+  0.5 µm/px. Set `TELEPATH_UM_PER_PX` if your phone and objective setup differs. Counts and densities depend
+  on this.
+- **Speed:** on an 8 GB Apple M3 it runs at batch 1 (3.5 patches/s), about 2 minutes per photo. A CUDA GPU
+  uses batches of 16 (`TELEPATH_CELL_BATCH`).
+- **Blur:** detection holds up well on blurry photos, but **typing does not**. On a lung adenocarcinoma photo,
+  a 0.8 px blur cut detected nuclei by only 8% (1,641 → 1,510), but dropped "neoplastic" from 50% to 13%:
+  blurred tumor nuclei read as connective or benign. Use sharp, in-focus photos, and treat type fractions
+  as indicative only.
+- **License:** the PanNuke training data is CC BY-NC-SA 4.0, so cell counting is for non-commercial and
+  research use.
 
 ## Run it
 
@@ -42,7 +113,8 @@ cd backend
 uv sync
 uv run uvicorn app.main:app --port 8000
 
-# Demo data: builds 6 eyepiece-style photos from real Kather CRC-VAL-HE-7K patches
+# Demo data: builds 6 eyepiece-style photos plus 3 stitched cases (9, 6 and 6 overlapping photos,
+# one of them deliberately out of focus) from real Kather CRC-VAL-HE-7K patches
 # and uploads them. Patches are range-requested from Zenodo; the first run takes a few minutes.
 uv run python scripts/fetch_samples.py --seed
 
@@ -121,16 +193,17 @@ that lists its output classes and which of them count as tumor, necrosis and non
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/cases` | Multipart `image`, `patient_ref`, `clinic?`, `specimen?`. Creates a case and queues analysis |
+| `POST` | `/api/cases` | Multipart `image` (one photo) or repeated `images` (stitched), plus `patient_ref`, `clinic?`, `specimen?`. Creates a case and queues analysis |
 | `GET` | `/api/cases?status=active\|reviewed\|<status>` | Triage queue: analyzed first, then urgency ↓, then oldest first |
 | `GET` | `/api/cases/{id}` | Case with full result (score, regions, composition, image/heatmap URLs) |
 | `PATCH` | `/api/cases/{id}` | Specialist review: `diagnosis`, `notes`, `status` (`reviewed` / `ready`) |
-| `POST` | `/api/cases/{id}/reanalyze` | Re-run analysis |
+| `POST` | `/api/cases/{id}/reanalyze?force=` | Re-run analysis with the active model. `force=true` overrides a quality-gate rejection |
 | `GET` | `/api/models` | Available models, the active one, load status |
 | `PUT` | `/api/models/active` | JSON `{"id": "midnight-kather100k"}`. Switches the model and loads it in the background |
 | `GET` | `/api/health` | Device, model status |
 
-Case files are stored under `backend/data/media/<id>/` (original, display JPEG, heatmap PNG),
+Case files are stored under `backend/data/media/<id>/` (original or `field_NN` photos, `mosaic.jpg`, display JPEG,
+heatmap PNG, `nuclei.json`, `quality.json`),
 with metadata in SQLite at `backend/data/telepath.db`.
 
 ## Tests
@@ -143,7 +216,8 @@ cd frontend && npm run build    # type-check + production bundle
 ## Layout
 
 ```
-backend/app/inference/   model registry + switching, foundation-model wrapper, tiling engine, scoring
+backend/app/inference/   model registry + switching, foundation-model wrapper, tiling engine, scoring,
+                         stitching (stitch.py), nucleus counting (cells.py)
 backend/app/api/         REST endpoints
 backend/app/worker.py    background analysis (one job at a time on the GPU)
 backend/scripts/         Kather sample builder / seeder, foundation-model head training

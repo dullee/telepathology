@@ -50,6 +50,7 @@ const STATUS_STYLE: Record<Status, string> = {
   ready: 'text-slate-700 dark:text-slate-200',
   reviewed: 'text-emerald-700 dark:text-emerald-400',
   failed: 'text-red-600',
+  retake: 'text-amber-600 dark:text-amber-400',
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -58,6 +59,7 @@ const STATUS_LABEL: Record<Status, string> = {
   ready: 'Awaiting review',
   reviewed: 'Reviewed',
   failed: 'Analysis failed',
+  retake: 'Retake photo',
 }
 
 export function StatusLabel({ status }: { status: Status }) {

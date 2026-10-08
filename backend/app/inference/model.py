@@ -10,6 +10,7 @@ import gc
 import json
 import logging
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
@@ -21,8 +22,45 @@ from app.inference.registry import ModelProfile, get_profile
 
 log = logging.getLogger(__name__)
 
-# Held while a model is loaded or used, so a switch never swaps weights mid-analysis.
-GPU_LOCK = threading.Lock()
+
+class GpuScheduler:
+    """One job on the GPU at a time, with triage first.
+
+    `urgent()` (loading the classifier, scoring a case) always runs before `background()` work
+    (cell counting). Background work takes the GPU in short slices, one chunk at a time, and
+    waits while any urgent job is queued, so a new case is never stuck behind minutes of
+    cell counting. Holding either slot also means a model switch never swaps weights mid-use.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cv = threading.Condition()
+        self._urgent_waiting = 0
+
+    @contextmanager
+    def urgent(self):
+        with self._cv:
+            self._urgent_waiting += 1
+        try:
+            self._lock.acquire()
+        finally:
+            with self._cv:
+                self._urgent_waiting -= 1
+                self._cv.notify_all()
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    @contextmanager
+    def background(self):
+        with self._cv:
+            self._cv.wait_for(lambda: self._urgent_waiting == 0)
+        with self._lock:
+            yield
+
+
+GPU = GpuScheduler()
 _SETTINGS = config.DATA_DIR / "active_model.json"
 
 
@@ -96,7 +134,7 @@ def _release() -> None:
 
 
 def load_model() -> Loaded:
-    """Return the active model, (re)loading it if the selection changed. Call under GPU_LOCK."""
+    """Return the active model, (re)loading it if the selection changed. Call inside GPU.urgent()."""
     global _loaded
     profile = active_profile()
     if _loaded and _loaded.profile.id == profile.id:
@@ -119,7 +157,7 @@ def load_model() -> Loaded:
 def warm() -> None:
     """Load the active model in the background so the first case doesn't pay for it."""
     try:
-        with GPU_LOCK:
+        with GPU.urgent():
             load_model()
     except Exception:
         log.exception("Model failed to load")

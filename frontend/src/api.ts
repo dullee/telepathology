@@ -1,5 +1,5 @@
 export type Tier = 'critical' | 'high' | 'routine'
-export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed'
+export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed' | 'retake'
 
 export interface Region {
   id: number
@@ -34,6 +34,48 @@ export interface AnalysisResult {
   /** Class code -> display label for the model that produced this result (absent on old results). */
   class_labels?: Record<string, string>
   tumor_classes?: string[]
+  /** Present when several photos were stitched into one mosaic. */
+  fields?: { uploaded: number; stitched: number; downscale: number } | null
+  cells?: CellSummary | null
+}
+
+export type QualityStatus = 'pass' | 'warn' | 'reject'
+
+export interface QualityCheck {
+  name: string
+  label: string
+  status: QualityStatus
+  value: number
+  message: string
+}
+
+/** Pre-analysis photo quality gate (quality.json). */
+export interface QualityReport {
+  status: QualityStatus
+  checks: QualityCheck[]
+  /** Stitched cases: photos left out before stitching. */
+  dropped: { photo: number; reason: string }[]
+  forced: boolean
+}
+
+export type NucleusType = 'neoplastic' | 'inflammatory' | 'connective' | 'dead' | 'epithelial'
+
+export type CellSummary =
+  | { status: 'counting' }
+  | { status: 'failed'; error: string }
+  | {
+      status: 'done'
+      total: number
+      counts: Record<NucleusType, number>
+      fractions: Record<NucleusType, number>
+      per_mm2: number
+      tissue_mm2: number
+      elapsed_ms: number
+    }
+
+/** nuclei.json: [x, y, type] in display-image pixels; type 1-5 in NUCLEUS_TYPES order. */
+export interface NucleiFile {
+  points: [number, number, number][]
 }
 
 interface CaseBase {
@@ -51,8 +93,12 @@ interface CaseBase {
   notes: string
   error: string
   original_url: string
+  /** Every uploaded photo when the case was stitched from several. */
+  field_urls: string[]
+  quality: QualityReport | null
   image_url?: string
   heatmap_url?: string
+  nuclei_url?: string
 }
 
 export interface CaseSummary extends CaseBase {
@@ -128,5 +174,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     }),
-  reanalyze: (id: number) => request<CaseDetail>(`/api/cases/${id}/reanalyze`, { method: 'POST' }),
+  reanalyze: (id: number, force = false) =>
+    request<CaseDetail>(`/api/cases/${id}/reanalyze${force ? '?force=true' : ''}`, { method: 'POST' }),
 }

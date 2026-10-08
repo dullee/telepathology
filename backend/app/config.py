@@ -32,6 +32,15 @@ BATCH_SIZE = int(os.getenv("TELEPATH_BATCH", 64))
 # Longest image side is resized to this before tiling (eyepiece photos are often 4000px+).
 MAX_SIDE = int(os.getenv("TELEPATH_MAX_SIDE", 2048))
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
+# Several overlapping photos of one slide are stitched into a mosaic (see inference/stitch.py).
+MAX_FIELDS = int(os.getenv("TELEPATH_MAX_FIELDS", 40))
+MOSAIC_MAX_SIDE = int(os.getenv("TELEPATH_MOSAIC_MAX_SIDE", 12000))
+# Microns per pixel of the analysed photo; a 20x objective photographed by phone is ~0.5.
+UM_PER_PX = float(os.getenv("TELEPATH_UM_PER_PX", 0.5))
+# Nucleus counting (HoVer-Net, trained at 0.25 µm/px) upscales the photo by this factor.
+CELL_SCALE = UM_PER_PX / 0.25
+CELL_COUNTING = os.getenv("TELEPATH_CELLS", "1") != "0"
+CELL_BATCH = int(os.getenv("TELEPATH_CELL_BATCH", 0))  # 0 = pick per device (see cells.py)
 
 # A tile is "suspicious" when P(tumor) exceeds this.
 TUMOR_THRESHOLD = 0.5

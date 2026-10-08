@@ -91,3 +91,27 @@ def test_head_with_wrong_classes_is_rejected(tmp_path, monkeypatch):
     torch.save({"weight": torch.zeros(2, 16), "bias": torch.zeros(2), "classes": ["A", "B"]}, profile.head_path)
     with pytest.raises(ValueError):
         foundation.load_head(profile)
+
+
+def test_gpu_scheduler_puts_triage_before_background_work():
+    """Background cell counting must yield to a case waiting for its urgency score."""
+    import threading
+    import time
+
+    gpu = model_mgr.GpuScheduler()
+    order: list[str] = []
+
+    def background_job():
+        for i in range(5):  # cell counting: one chunk per slot
+            with gpu.background():
+                order.append(f"chunk{i}")
+                time.sleep(0.05)
+
+    t = threading.Thread(target=background_job)
+    t.start()
+    time.sleep(0.07)  # mid-way through chunk 1
+    with gpu.urgent():
+        order.append("triage")
+    t.join()
+    assert order.index("triage") <= 2, order  # got in after at most the chunk in progress
+    assert order.count("triage") == 1 and len(order) == 6

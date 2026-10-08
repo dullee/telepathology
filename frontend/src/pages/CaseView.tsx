@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { api, type CaseDetail, type Region } from '../api.ts'
+import { api, type CaseDetail, type CellSummary, type QualityReport, type Region } from '../api.ts'
 import { SlideViewer } from '../components/SlideViewer.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.tsx'
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
+import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 import { usePolling } from '../lib/usePolling.ts'
 
 // Colorectal labels for results saved before models carried their own class_labels.
@@ -52,7 +53,8 @@ export function CaseView() {
   const [error, setError] = useState('')
   const [focus, setFocus] = useState<Region | null>(null)
 
-  const pending = !c || c.status === 'queued' || c.status === 'analyzing'
+  const pending =
+    !c || c.status === 'queued' || c.status === 'analyzing' || c.result?.cells?.status === 'counting'
   usePolling(
     () => api.getCase(id!).then(setCase, (e: Error) => setError(e.message)),
     2500,
@@ -87,12 +89,29 @@ export function CaseView() {
             regions={r.regions}
             focus={focus}
             onSelect={setFocus}
+            nucleiUrl={c.nuclei_url}
+            nucleiCount={r.cells?.status === 'done' ? r.cells.total : undefined}
           />
         ) : (
           <div className="flex size-full flex-col items-center justify-center gap-3 text-slate-300">
-            <img src={c.original_url} alt="" className="max-h-[50%] max-w-[70%] rounded opacity-60" />
+            {c.field_urls.length > 1 ? (
+              <div className="grid max-w-[80%] grid-cols-4 gap-1 opacity-60 sm:grid-cols-6">
+                {c.field_urls.map((u) => (
+                  <img key={u} src={u} alt="" className="aspect-square rounded object-cover" />
+                ))}
+              </div>
+            ) : (
+              <img src={c.original_url} alt="" className="max-h-[50%] max-w-[70%] rounded opacity-60" />
+            )}
+            {c.field_urls.length > 1 && (c.status === 'queued' || c.status === 'analyzing') && (
+              <p className="text-sm text-slate-400">Stitching {c.field_urls.length} photos…</p>
+            )}
             {c.status === 'failed' ? (
               <p className="text-red-400">Analysis failed: {c.error}</p>
+            ) : c.status === 'retake' ? (
+              <p className="max-w-md px-4 text-center text-amber-300">
+                Not analysed: the photo quality is too low. Please ask the clinic to retake it.
+              </p>
             ) : (
               <StatusLabel status={c.status} />
             )}
@@ -115,10 +134,28 @@ export function CaseView() {
                 <p className="text-xs text-slate-500" title={parseDate(c.created_at).toLocaleString()}>
                   Received {timeAgo(c.created_at)}
                 </p>
+                {r?.fields && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Stitched from {r.fields.stitched} of {r.fields.uploaded} photos
+                    {r.fields.stitched < r.fields.uploaded && (
+                      <span className="text-amber-600 dark:text-amber-400">
+                        {' '}· {r.fields.uploaded - r.fields.stitched} left out (blurry, dark or not overlapping)
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
               <StatusLabel status={c.status} />
             </div>
           </div>
+
+          {c.quality && (c.quality.status !== 'pass' || c.quality.dropped.length > 0) && (
+            <QualityPanel
+              q={c.quality}
+              retake={c.status === 'retake'}
+              onForce={() => api.reanalyze(c.id, true).then(setCase)}
+            />
+          )}
 
           {c.status === 'failed' && (
             <button
@@ -211,6 +248,8 @@ export function CaseView() {
                     ))}
                 </ul>
               </section>
+
+              {r.cells && <CellCounts cells={r.cells} />}
             </>
           )}
 
@@ -220,6 +259,126 @@ export function CaseView() {
         </div>
       </aside>
     </main>
+  )
+}
+
+const QUALITY_ICON = { pass: '✓', warn: '!', reject: '✕' } as const
+const QUALITY_TONE = {
+  pass: 'text-emerald-600 dark:text-emerald-400',
+  warn: 'text-amber-600 dark:text-amber-400',
+  reject: 'text-red-600 dark:text-red-400',
+} as const
+
+/** Pre-analysis photo checks: why a photo needs retaking, or what to keep in mind about the result. */
+function QualityPanel({ q, retake, onForce }: { q: QualityReport; retake: boolean; onForce: () => void }) {
+  const problems = q.checks.filter((ch) => ch.status !== 'pass')
+  return (
+    <section
+      className={`rounded-lg border p-3 text-sm ${
+        q.status === 'reject'
+          ? 'border-red-200 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30'
+          : 'border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30'
+      }`}
+    >
+      <h2 className="font-semibold">
+        {retake ? 'Retake needed: photo quality too low' : q.forced ? 'Analysed despite low photo quality' : 'Photo quality warnings'}
+      </h2>
+      <ul className="mt-2 space-y-1">
+        {problems.map((ch) => (
+          <li key={ch.name} className="flex gap-2">
+            <span className={`w-3 shrink-0 text-center font-bold ${QUALITY_TONE[ch.status]}`}>{QUALITY_ICON[ch.status]}</span>
+            <span>
+              <span className="font-medium">{ch.label}.</span> {ch.message}
+            </span>
+          </li>
+        ))}
+        {q.dropped.map((d) => (
+          <li key={d.photo} className="flex gap-2">
+            <span className={`w-3 shrink-0 text-center font-bold ${QUALITY_TONE.reject}`}>✕</span>
+            <span>
+              <span className="font-medium">Photo {d.photo} left out.</span> {d.reason}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <details className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+        <summary className="cursor-pointer select-none">All checks</summary>
+        <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          {q.checks.map((ch) => (
+            <li key={ch.name} className="flex items-center gap-1.5">
+              <span className={`font-bold ${QUALITY_TONE[ch.status]}`}>{QUALITY_ICON[ch.status]}</span>
+              {ch.label}
+              <span className="ml-auto tabular-nums text-slate-500">{ch.value}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+      {retake && (
+        <button
+          onClick={onForce}
+          className="mt-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+        >
+          Analyse anyway
+        </button>
+      )}
+    </section>
+  )
+}
+
+function CellCounts({ cells }: { cells: CellSummary }) {
+  if (cells.status === 'counting') {
+    return (
+      <section>
+        <h2 className="mb-1 text-sm font-semibold">Cell counts</h2>
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <span className="size-2 animate-pulse rounded-full bg-amber-400" />
+          Counting nuclei… the urgency score above is already final.
+        </p>
+      </section>
+    )
+  }
+  if (cells.status === 'failed') {
+    return (
+      <section>
+        <h2 className="mb-1 text-sm font-semibold">Cell counts</h2>
+        <p className="text-sm text-red-600">Cell counting failed: {cells.error}</p>
+      </section>
+    )
+  }
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold">Cell counts</h2>
+      <dl className="mb-3 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-md bg-slate-50 py-2 dark:bg-slate-800/50">
+          <dd className="text-lg font-semibold tabular-nums">{cells.total.toLocaleString()}</dd>
+          <dt className="text-[11px] text-slate-500">nuclei</dt>
+        </div>
+        <div className="rounded-md bg-slate-50 py-2 dark:bg-slate-800/50">
+          <dd className="text-lg font-semibold tabular-nums">{pct(cells.fractions.neoplastic)}</dd>
+          <dt className="text-[11px] text-slate-500">neoplastic</dt>
+        </div>
+        <div className="rounded-md bg-slate-50 py-2 dark:bg-slate-800/50">
+          <dd className="text-lg font-semibold tabular-nums">{Math.round(cells.per_mm2).toLocaleString()}</dd>
+          <dt className="text-[11px] text-slate-500">per mm² tissue</dt>
+        </div>
+      </dl>
+      <ul className="space-y-1 text-xs">
+        {NUCLEUS_TYPES.map((t) => (
+          <li key={t.key} className="flex items-center gap-2">
+            <span className="w-28 shrink-0 truncate text-slate-600 dark:text-slate-300">{t.label}</span>
+            <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <span className={`block h-full ${t.swatch}`} style={{ width: `${(cells.fractions[t.key] ?? 0) * 100}%` }} />
+            </span>
+            <span className="w-12 text-right tabular-nums text-slate-500">{(cells.counts[t.key] ?? 0).toLocaleString()}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] text-slate-500">
+        Cell types need a sharp photo: slight blur makes tumor nuclei read as connective or benign, so a low
+        neoplastic % on a soft image is not reassuring. HoVer-Net (PanNuke) · assumes a 20× objective (~0.5 µm/px) ·{' '}
+        {(cells.elapsed_ms / 1000).toFixed(0)} s · research use only.
+      </p>
+    </section>
   )
 }
 

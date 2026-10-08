@@ -59,10 +59,10 @@ class AnalysisResult:
         return asdict(self)
 
 
-def prepare_image(path: Path) -> Image.Image:
+def prepare_image(path: Path, max_side: int = config.MAX_SIDE) -> Image.Image:
     """Load, honour EXIF rotation (phone photos), convert to RGB and cap the longest side."""
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
-    scale = config.MAX_SIDE / max(img.size)
+    scale = max_side / max(img.size)
     if scale < 1:
         img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
     return img
@@ -181,14 +181,21 @@ def find_regions(
 
 
 def analyze(
-    image_path: Path, display_path: Path, heatmap_path: Path, model, device, spec: ClassSpec = KATHER
+    image_path: Path,
+    display_path: Path,
+    heatmap_path: Path,
+    model,
+    device,
+    spec: ClassSpec = KATHER,
+    max_side: int = config.MAX_SIDE,
 ) -> AnalysisResult:
-    """`spec` says which of the model's output classes are tumor / necrosis / non-tissue."""
+    """`spec` says which of the model's output classes are tumor / necrosis / non-tissue.
+    `max_side` is raised for stitched mosaics, which are already at the analysis scale."""
     idx = {c: i for i, c in enumerate(spec.classes)}
     tumor_idx = [idx[c] for c in spec.tumor]
     necrosis_idx = [idx[c] for c in spec.necrosis]
     started = time.perf_counter()
-    img = prepare_image(image_path)
+    img = prepare_image(image_path, max_side)
     img.save(display_path, "JPEG", quality=90)
     arr = _pad_to_tile(np.asarray(img))
 

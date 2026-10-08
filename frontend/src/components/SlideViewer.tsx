@@ -2,8 +2,9 @@ import L, { type LatLngBoundsExpression } from 'leaflet'
 import { useEffect, useMemo, useState } from 'react'
 import { ImageOverlay, MapContainer, Rectangle, Tooltip, useMap } from 'react-leaflet'
 
-import type { Region } from '../api.ts'
+import type { NucleiFile, Region } from '../api.ts'
 import { pct } from '../lib/format.ts'
+import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 
 interface Props {
   imageUrl: string
@@ -13,6 +14,8 @@ interface Props {
   regions: Region[]
   focus: Region | null
   onSelect: (r: Region) => void
+  nucleiUrl?: string
+  nucleiCount?: number
 }
 
 /** Image pixel box (origin top-left) → Leaflet CRS.Simple bounds (origin bottom-left). */
@@ -36,7 +39,33 @@ function Fit({ bounds, focus, h }: { bounds: L.LatLngBounds; focus: Region | nul
   return null
 }
 
-export function SlideViewer({ imageUrl, heatmapUrl, width, height, regions, focus, onSelect }: Props) {
+/** One dot per detected nucleus, drawn on a shared canvas so tens of thousands stay smooth. */
+function NucleiLayer({ url, h }: { url: string; h: number }) {
+  const map = useMap()
+  useEffect(() => {
+    const renderer = L.canvas({ padding: 0.2 })
+    const group = L.layerGroup().addTo(map)
+    let cancelled = false
+    fetch(url)
+      .then((r) => r.json() as Promise<NucleiFile>)
+      .then(({ points }) => {
+        if (cancelled) return
+        for (const [x, y, t] of points) {
+          const color = NUCLEUS_TYPES[t - 1]?.color ?? '#ffffff'
+          L.circleMarker([h - y, x], { renderer, radius: 3, weight: 1.5, color, fillOpacity: 0, interactive: false }).addTo(group)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      group.remove()
+    }
+  }, [map, url, h])
+  return null
+}
+
+export function SlideViewer({ imageUrl, heatmapUrl, width, height, regions, focus, onSelect, nucleiUrl, nucleiCount }: Props) {
+  const [showCells, setShowCells] = useState(false)
   const [showHeat, setShowHeat] = useState(true)
   const [opacity, setOpacity] = useState(0.55)
   const [showRegions, setShowRegions] = useState(true)
@@ -57,6 +86,7 @@ export function SlideViewer({ imageUrl, heatmapUrl, width, height, regions, focu
         <Fit bounds={bounds} focus={focus} h={height} />
         <ImageOverlay url={imageUrl} bounds={bounds} />
         {heatmapUrl && showHeat && <ImageOverlay url={heatmapUrl} bounds={bounds} opacity={opacity} zIndex={2} />}
+        {nucleiUrl && showCells && <NucleiLayer url={nucleiUrl} h={height} />}
         {showRegions &&
           regions.map((r) => (
             <Rectangle
@@ -102,6 +132,24 @@ export function SlideViewer({ imageUrl, heatmapUrl, width, height, regions, focu
           <span>Suspicious regions ({regions.length})</span>
           <input type="checkbox" checked={showRegions} onChange={(e) => setShowRegions(e.target.checked)} className="accent-cyan-500" />
         </label>
+        {nucleiUrl && (
+          <div className="border-t border-white/10 pt-2">
+            <label className="flex cursor-pointer items-center justify-between gap-2">
+              <span>Cells{nucleiCount != null && ` (${nucleiCount.toLocaleString()})`}</span>
+              <input type="checkbox" checked={showCells} onChange={(e) => setShowCells(e.target.checked)} className="accent-cyan-500" />
+            </label>
+            {showCells && (
+              <ul className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] text-slate-300">
+                {NUCLEUS_TYPES.map((t) => (
+                  <li key={t.key} className="flex items-center gap-1.5 truncate">
+                    <span className="size-2 shrink-0 rounded-full border-2" style={{ borderColor: t.color }} />
+                    {t.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
