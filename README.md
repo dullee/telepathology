@@ -138,7 +138,8 @@ To serve other machines on the clinic LAN, run `uvicorn ... --host 0.0.0.0` and
 **Hosted dashboard:** https://pathtriage.vercel.app is built with `VITE_API_BASE=http://localhost:8000`,
 so it talks to the backend on whichever computer opens it. Start the backend, then open the site
 (Chrome, Edge or Firefox; allow local network access if asked). No `npm` step is needed on that
-machine. To redeploy after dashboard changes: `cd frontend && npx vercel deploy --prod`.
+machine. The Vercel project builds `frontend/` (its Root Directory) and redeploys on every push to
+`main`; `VITE_API_BASE` is set in the project's environment variables.
 `VITE_API_BASE` can instead point at any public backend URL (for example a Tailscale Funnel address).
 
 ## Models
