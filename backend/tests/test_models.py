@@ -115,3 +115,21 @@ def test_gpu_scheduler_puts_triage_before_background_work():
     t.join()
     assert order.index("triage") <= 2, order  # got in after at most the chunk in progress
     assert order.count("triage") == 1 and len(order) == 6
+
+
+def test_switch_during_download_skips_the_stale_model(monkeypatch):
+    """Picking ResNet while Midnight is still downloading must not wait for, or load, Midnight."""
+    monkeypatch.setattr(model_mgr, "_active_id", "midnight-kather100k")
+    loaded = []
+    monkeypatch.setattr(model_mgr, "load_model", lambda: loaded.append(model_mgr._active_id))
+
+    def slow_download(profile):
+        # The user switches to ResNet while this download is still running.
+        monkeypatch.setattr(model_mgr, "_active_id", "resnet18-kather100k")
+
+    monkeypatch.setattr(model_mgr, "_download", slow_download)
+    model_mgr.warm()
+    assert loaded == []  # the Midnight warm thread steps aside
+
+    model_mgr.warm()  # the ResNet switch's own warm thread
+    assert loaded == ["resnet18-kather100k"]

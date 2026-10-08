@@ -154,8 +154,27 @@ def load_model() -> Loaded:
         state["loading"] = ""
 
 
+def _download(profile: ModelProfile) -> None:
+    """Fetch foundation-model weights (several GB) into the Hugging Face cache. Runs without the
+    GPU lock, so a slow download never blocks scoring or a switch to another model."""
+    if profile.family == "foundation":
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(profile.hf_repo, allow_patterns=["*.json", "*.safetensors"])
+
+
 def warm() -> None:
     """Load the active model in the background so the first case doesn't pay for it."""
+    profile = active_profile()
+    try:
+        _download(profile)
+    except Exception as exc:
+        log.exception("Download failed for %s", profile.id)
+        if active_profile().id == profile.id:
+            state["error"] = f"{profile.label}: download failed ({exc})"
+        return
+    if active_profile().id != profile.id:
+        return  # another model was picked during the download; its own warm() loads it
     try:
         with GPU.urgent():
             load_model()
