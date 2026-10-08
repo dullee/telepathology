@@ -73,3 +73,32 @@ def test_hotspot_landmarks_and_tissue_map(synthetic, tmp_path):
     tmap = Image.open(tmp_path / "t.png")
     assert tmap.size == (res.width, res.height) and tmap.mode == "RGBA"
     assert tmap.getpixel((r.hotspot_x, r.hotspot_y))[:3] == config.TISSUE_COLORS["TUM"]
+
+
+class FakeLungModel(torch.nn.Module):
+    """Splits red tiles' tumor mass across both carcinoma classes, so neither alone passes 0.5."""
+
+    def forward(self, x):
+        red = (x[:, 0].mean(dim=(1, 2)) > 0.7).float()
+        p = torch.zeros(x.shape[0], 3)  # NOR, ACA, SCC
+        p[:, 0] = 1 - red
+        p[:, 1] = 0.45 * red
+        p[:, 2] = 0.55 * red
+        return p
+
+
+def test_spec_with_two_tumor_classes(synthetic, tmp_path):
+    from app.inference.registry import LUNG
+
+    res = engine.analyze(
+        synthetic, tmp_path / "d.jpg", tmp_path / "h.png", FakeLungModel(), torch.device("cpu"), LUNG,
+        tissue_map_path=tmp_path / "t.png",
+    )
+    assert set(res.composition) == {"NOR", "ACA", "SCC"}
+    assert res.regions and res.max_tumor_prob > 0.9, "ACA + SCC should add up to one tumor signal"
+    assert res.necrosis_fraction == 0
+    # Landmarks and the tissue map follow the lung classes, not the colorectal ones.
+    assert [lm.cls for lm in res.landmarks] == ["NOR"]
+    r = res.regions[0]
+    tmap = Image.open(tmp_path / "t.png")
+    assert tmap.getpixel((r.hotspot_x, r.hotspot_y))[:3] == config.TISSUE_COLORS["SCC"]

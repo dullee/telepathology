@@ -29,7 +29,7 @@ export function buildStops(r: AnalysisResult): GuideStop[] {
     x: lm.x,
     y: lm.y,
     prob: lm.prob,
-    title: `Example: ${tissueInfo(lm.cls).label}`,
+    title: `Example: ${tissueInfo(lm.cls, r.organ).label}`,
   }))
   return [...regions, ...examples]
 }

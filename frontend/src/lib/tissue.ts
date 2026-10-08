@@ -2,6 +2,7 @@
  * Tissue classes the model reports, with plain-language viewing notes so someone who is not a
  * pathologist knows what each marked spot should look like in an H&E photo.
  * Colours must match TISSUE_COLORS in backend/app/config.py (they paint the tissue map).
+ * TISSUE covers the colorectal (Kather) classes; ORGAN_TISSUE below adds stomach, liver and lung.
  */
 export interface TissueInfo {
   label: string
@@ -83,5 +84,138 @@ export const TISSUE: Record<string, TissueInfo> = {
   },
 }
 
-export const tissueInfo = (cls: string): TissueInfo =>
-  TISSUE[cls] ?? { label: cls, color: '#94a3b8', what: '', lookFor: [] }
+/**
+ * Organ-specific notes for the organ models (see backend/app/inference/registry.py). Entries here win
+ * over the colorectal TISSUE notes. Class codes keep one colour across organs (TUM/ACA red, NOR green…).
+ * "TUM" is also used for tumor-region stops in organs whose model has several tumor classes (lung).
+ */
+export const ORGAN_TISSUE: Record<string, Record<string, TissueInfo>> = {
+  Stomach: {
+    TUM: {
+      label: 'Gastric adenocarcinoma',
+      color: '#dc2626',
+      what: 'Cancer of the stomach lining. It grows either as abnormal glands or as scattered single cells.',
+      lookFor: [
+        'Irregular, crowded or fused glands with enlarged, dark, uneven nuclei',
+        'Single loose cells infiltrating between normal glands; "signet-ring" cells have a clear mucin bubble pushing the nucleus to one side',
+        'Tumor reaching below the mucosa into stroma or muscle',
+      ],
+    },
+    NOR: {
+      label: 'Normal gastric mucosa',
+      color: '#10b981',
+      what: 'Healthy stomach lining. Use it as your comparison for what "normal" looks like.',
+      lookFor: [
+        'Regular surface pits lined by tall cells filled with pale mucin',
+        'Evenly spaced glands below; in the body of the stomach, pink and purple gland cells side by side',
+        'Small, round nuclei sitting neatly at the base of each cell',
+      ],
+    },
+    DEB: {
+      label: 'Debris / necrosis',
+      color: '#f97316',
+      what: 'Dead tissue, often in the centre of a tumor or at an ulcer surface.',
+      lookFor: ['Smudgy pink-purple material with no clear cell outlines', 'Scattered dark fragments of broken nuclei'],
+    },
+  },
+  Liver: {
+    TUM: {
+      label: 'Hepatocellular carcinoma',
+      color: '#dc2626',
+      what: 'Cancer of the liver cells themselves (HCC). It replaces the normal plate-and-sinusoid pattern.',
+      lookFor: [
+        'Liver cells in thick cords (more than 3 cells across) or solid sheets instead of thin plates',
+        'Enlarged nuclei with prominent nucleoli and a high nucleus-to-cytoplasm ratio',
+        'No portal tracts within the nodule; sometimes small gland-like (pseudoglandular) spaces',
+      ],
+    },
+    NOR: {
+      label: 'Normal liver',
+      color: '#10b981',
+      what: 'Healthy liver. Use it as your comparison for what "normal" looks like.',
+      lookFor: [
+        'Thin plates of liver cells, 1–2 cells thick, separated by narrow sinusoid channels',
+        'Polygonal cells with pink cytoplasm and one round, central nucleus',
+        'Portal tracts: a bile duct, artery and vein together in a small pocket of connective tissue',
+      ],
+    },
+    FIB: {
+      label: 'Fibrosis',
+      color: '#f472b6',
+      what: 'Scar tissue. Bands that connect portal tracts and encircle nodules indicate cirrhosis, a soil for HCC.',
+      lookFor: ['Pink bands of collagen with few, thin nuclei', 'Bands bridging between portal tracts or wrapping around round nodules'],
+    },
+    INF: {
+      label: 'Inflammation',
+      color: '#6366f1',
+      what: 'Immune cells, as in hepatitis.',
+      lookFor: [
+        'Clusters of small, round, very dark nuclei',
+        'Usually in portal tracts, sometimes spilling into the surrounding liver cells',
+      ],
+    },
+    NEC: {
+      label: 'Necrosis',
+      color: '#f97316',
+      what: 'Dead tissue, common in the centre of larger tumors.',
+      lookFor: ['Pale pink areas where cells have lost their nuclei ("ghost" cell outlines)', 'Granular debris and nuclear fragments'],
+    },
+    REA: {
+      label: 'Bile duct reaction',
+      color: '#14b8a6',
+      what: 'Proliferating small bile ducts, a response to chronic liver injury.',
+      lookFor: ['Small, irregular duct-like tubes of cuboidal cells', 'At the edges of portal tracts and fibrous bands, often with inflammation'],
+    },
+    STE: {
+      label: 'Steatosis',
+      color: '#facc15',
+      what: 'Fat inside liver cells (fatty liver). Common, and usually not cancer by itself.',
+      lookFor: ['Round, clear, empty-looking vacuoles inside liver cells', 'Large vacuoles push the nucleus to the edge of the cell'],
+    },
+  },
+  Lung: {
+    TUM: {
+      label: 'Lung carcinoma',
+      color: '#dc2626',
+      what: 'Cancer replacing normal lung. The model splits it into adenocarcinoma and squamous cell carcinoma.',
+      lookFor: [
+        'Crowded cells with enlarged, dark, irregular nuclei and visible nucleoli',
+        'Air spaces filled or replaced by solid groups of cells',
+        'Dense fibrous stroma around tumor nests or glands',
+      ],
+    },
+    ACA: {
+      label: 'Adenocarcinoma',
+      color: '#dc2626',
+      what: 'Gland-forming lung cancer, the most common type.',
+      lookFor: [
+        'Glands, papillae, or tumor cells lining the alveolar walls',
+        'Sometimes pale mucin inside the cells or glands',
+        'Nuclei often large and pale with a prominent nucleolus',
+      ],
+    },
+    SCC: {
+      label: 'Squamous cell carcinoma',
+      color: '#a21caf',
+      what: 'Lung cancer resembling skin-type (squamous) cells; strongly linked to smoking.',
+      lookFor: [
+        'Nests and sheets of cells with plenty of glassy pink cytoplasm',
+        'Keratin pearls: concentric pink whorls in the middle of nests',
+        'Necrosis in the centre of nests',
+      ],
+    },
+    NOR: {
+      label: 'Normal lung',
+      color: '#10b981',
+      what: 'Healthy lung. Use it as your comparison for what "normal" looks like.',
+      lookFor: [
+        'A lacy network of open air spaces (alveoli) with thin pink walls',
+        'Few, small, flat nuclei in the walls',
+        'Airways lined by a single orderly row of tall cells',
+      ],
+    },
+  },
+}
+
+export const tissueInfo = (cls: string, organ?: string): TissueInfo =>
+  (organ && ORGAN_TISSUE[organ]?.[cls]) || TISSUE[cls] || { label: cls, color: '#94a3b8', what: '', lookFor: [] }

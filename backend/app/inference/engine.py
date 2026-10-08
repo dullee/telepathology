@@ -19,11 +19,8 @@ from scipy import ndimage
 
 from app import config
 from app.inference.device import describe
+from app.inference.registry import KATHER, ClassSpec
 from app.inference.scoring import tier_for, urgency_score
-
-TUM = config.CLASSES.index("TUM")
-DEB = config.CLASSES.index("DEB")
-NON_TISSUE_IDX = [config.CLASSES.index(c) for c in config.NON_TISSUE]
 
 
 @dataclass
@@ -76,10 +73,10 @@ class AnalysisResult:
         return asdict(self)
 
 
-def prepare_image(path: Path) -> Image.Image:
+def prepare_image(path: Path, max_side: int = config.MAX_SIDE) -> Image.Image:
     """Load, honour EXIF rotation (phone photos), convert to RGB and cap the longest side."""
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
-    scale = config.MAX_SIDE / max(img.size)
+    scale = max_side / max(img.size)
     if scale < 1:
         img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
     return img
@@ -169,10 +166,12 @@ def _cell_centre(cy: int, cx: int, size: tuple[int, int]) -> tuple[int, int]:
     return min(w - 1, int((cx + 0.5) * s)), min(h - 1, int((cy + 0.5) * s))
 
 
-def render_tissue_map(labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int]) -> Image.Image:
+def render_tissue_map(
+    labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int], spec: ClassSpec = KATHER
+) -> Image.Image:
     """RGBA overlay colouring each tissue cell by its most likely class."""
     rgba = np.zeros((*labels.shape, 4), np.uint8)
-    for i, c in enumerate(config.CLASSES):
+    for i, c in enumerate(spec.classes):
         if c in config.TISSUE_COLORS:
             m = (labels == i) & tissue
             rgba[m, :3] = config.TISSUE_COLORS[c]
@@ -181,12 +180,14 @@ def render_tissue_map(labels: np.ndarray, tissue: np.ndarray, size: tuple[int, i
 
 
 def find_landmarks(
-    grid: np.ndarray, labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int]
+    grid: np.ndarray, labels: np.ndarray, tissue: np.ndarray, size: tuple[int, int], spec: ClassSpec = KATHER
 ) -> list[Landmark]:
-    """One confident example per tissue class, preferring cells surrounded by the same class."""
+    """One confident example per non-tumor tissue class (tumor is covered by region hotspots),
+    preferring cells surrounded by the same class."""
     out = []
-    for c in config.LANDMARK_CLASSES:
-        i = config.CLASSES.index(c)
+    for i, c in enumerate(spec.classes):
+        if c in spec.tumor or c in spec.non_tissue:
+            continue
         mask = (labels == i) & tissue
         if not mask.any():
             continue
@@ -246,10 +247,17 @@ def analyze(
     heatmap_path: Path,
     model,
     device,
+    spec: ClassSpec = KATHER,
+    max_side: int = config.MAX_SIDE,
     tissue_map_path: Path | None = None,
 ) -> AnalysisResult:
+    """`spec` says which of the model's output classes are tumor / necrosis / non-tissue.
+    `max_side` is raised for stitched mosaics, which are already at the analysis scale."""
+    idx = {c: i for i, c in enumerate(spec.classes)}
+    tumor_idx = [idx[c] for c in spec.tumor]
+    necrosis_idx = [idx[c] for c in spec.necrosis]
     started = time.perf_counter()
-    img = prepare_image(image_path)
+    img = prepare_image(image_path, max_side)
     img.save(display_path, "JPEG", quality=90)
     arr = _pad_to_tile(np.asarray(img))
 
@@ -257,32 +265,35 @@ def analyze(
     grid = probability_grid(probs, origins, img.height, img.width)
 
     labels = grid.argmax(axis=2)
-    tissue = pixel_tissue_mask(np.asarray(img), grid.shape[:2]) & ~np.isin(labels, NON_TISSUE_IDX)
+    non_tissue_idx = [idx[c] for c in spec.non_tissue]
+    tissue = pixel_tissue_mask(np.asarray(img), grid.shape[:2]) & ~np.isin(labels, non_tissue_idx)
     tissue_cells = int(tissue.sum())
-    tumor = grid[..., TUM]
+    # Several tumor classes (e.g. lung adenocarcinoma + squamous) add up to one P(tumor).
+    tumor = grid[..., tumor_idx].sum(axis=2)
+    necrotic = grid[..., necrosis_idx].sum(axis=2)
 
     if tissue_cells:
         tumor_fraction = float(((tumor >= config.TUMOR_THRESHOLD) & tissue).sum() / tissue_cells)
         # Smoothed so one noisy cell can't dominate the score.
         smooth = ndimage.uniform_filter(np.where(tissue, tumor, 0), size=3, mode="constant")
         max_tumor = float(smooth[tissue].max())
-        necrosis = float(((labels == DEB) & tissue).sum() / tissue_cells)
+        necrosis = float((np.isin(labels, necrosis_idx) & tissue).sum() / tissue_cells)
         mean_probs = grid[tissue].mean(axis=0)
         composition = {
             c: round(float(v), 4)
-            for c, v in zip(config.CLASSES, mean_probs / mean_probs.sum())
-            if c not in config.NON_TISSUE
+            for c, v in zip(spec.classes, mean_probs / mean_probs.sum())
+            if c not in spec.non_tissue
         }
     else:
         tumor_fraction = max_tumor = necrosis = 0.0
         composition = {}
 
-    regions = find_regions(tumor, tumor + grid[..., DEB], tissue, img.size)
+    regions = find_regions(tumor, tumor + necrotic, tissue, img.size)
     largest = regions[0].area_fraction if regions else 0.0
     lesion_fraction = min(1.0, sum(r.area_fraction for r in regions))
     render_heatmap(tumor, tissue, img.size).save(heatmap_path, "PNG", optimize=True)
     if tissue_map_path:
-        render_tissue_map(labels, tissue, img.size).save(tissue_map_path, "PNG", optimize=True)
+        render_tissue_map(labels, tissue, img.size, spec).save(tissue_map_path, "PNG", optimize=True)
 
     score = urgency_score(max(tumor_fraction, lesion_fraction), max_tumor, largest, necrosis)
     return AnalysisResult(
@@ -298,7 +309,7 @@ def analyze(
         tissue_fraction=round(tissue_cells / tissue.size, 4),
         composition=composition,
         regions=regions,
-        landmarks=find_landmarks(grid, labels, tissue, img.size),
+        landmarks=find_landmarks(grid, labels, tissue, img.size, spec),
         tiles=len(origins),
         grid_shape=tissue.shape,
         device=describe(device),

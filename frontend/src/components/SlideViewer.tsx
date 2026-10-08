@@ -2,10 +2,11 @@ import L, { type LatLngBoundsExpression, type LatLngExpression } from 'leaflet'
 import { useEffect, useMemo, useState } from 'react'
 import { Circle, ImageOverlay, MapContainer, Marker, Rectangle, Tooltip, useMap } from 'react-leaflet'
 
-import type { Region } from '../api.ts'
+import type { NucleiFile, Region } from '../api.ts'
 import { pct } from '../lib/format.ts'
 import type { GuideStop } from '../lib/guide.ts'
-import { TISSUE, tissueInfo } from '../lib/tissue.ts'
+import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
+import { tissueInfo } from '../lib/tissue.ts'
 
 type Overlay = 'heat' | 'tissue' | 'none'
 
@@ -18,6 +19,11 @@ interface Props {
   stops: GuideStop[]
   focus: GuideStop | null
   onSelect: (s: GuideStop) => void
+  /** Tissue classes of the model that produced the result, for the tissue-map legend. */
+  classes: string[]
+  organ?: string
+  nucleiUrl?: string
+  nucleiCount?: number
 }
 
 /** Image pixel box (origin top-left) → Leaflet CRS.Simple bounds (origin bottom-left). */
@@ -33,8 +39,8 @@ const toLatLng = (s: GuideStop, h: number): LatLngExpression => [h - s.y, s.x]
 /** Radius of the "look here" circle: about one model tile, the area the AI judged. */
 const LOOK_RADIUS = 112
 
-function pinIcon(stop: GuideStop, focused: boolean) {
-  const color = tissueInfo(stop.cls).color
+function pinIcon(stop: GuideStop, focused: boolean, organ?: string) {
+  const color = tissueInfo(stop.cls, organ).color
   const label = stop.region ? String(stop.region.id) : ''
   return L.divIcon({
     className: '',
@@ -56,8 +62,47 @@ function Fit({ bounds, focus, h }: { bounds: L.LatLngBounds; focus: GuideStop | 
   return null
 }
 
-export function SlideViewer({ imageUrl, heatmapUrl, tissueMapUrl, width, height, stops, focus, onSelect }: Props) {
+/** One dot per detected nucleus, drawn on a shared canvas so tens of thousands stay smooth. */
+function NucleiLayer({ url, h }: { url: string; h: number }) {
+  const map = useMap()
+  useEffect(() => {
+    const renderer = L.canvas({ padding: 0.2 })
+    const group = L.layerGroup().addTo(map)
+    let cancelled = false
+    fetch(url)
+      .then((r) => r.json() as Promise<NucleiFile>)
+      .then(({ points }) => {
+        if (cancelled) return
+        for (const [x, y, t] of points) {
+          const color = NUCLEUS_TYPES[t - 1]?.color ?? '#ffffff'
+          L.circleMarker([h - y, x], { renderer, radius: 3, weight: 1.5, color, fillOpacity: 0, interactive: false }).addTo(group)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      group.remove()
+    }
+  }, [map, url, h])
+  return null
+}
+
+export function SlideViewer({
+  imageUrl,
+  heatmapUrl,
+  tissueMapUrl,
+  width,
+  height,
+  stops,
+  focus,
+  onSelect,
+  classes,
+  organ,
+  nucleiUrl,
+  nucleiCount,
+}: Props) {
   const [overlay, setOverlay] = useState<Overlay>('heat')
+  const [showCells, setShowCells] = useState(false)
   const [opacity, setOpacity] = useState(0.55)
   const [showPins, setShowPins] = useState(true)
   const bounds = useMemo(() => L.latLngBounds([0, 0], [height, width]), [width, height])
@@ -83,6 +128,7 @@ export function SlideViewer({ imageUrl, heatmapUrl, tissueMapUrl, width, height,
         <Fit bounds={bounds} focus={focus} h={height} />
         <ImageOverlay url={imageUrl} bounds={bounds} />
         {overlayUrl && <ImageOverlay key={overlay} url={overlayUrl} bounds={bounds} opacity={opacity} zIndex={2} />}
+        {nucleiUrl && showCells && <NucleiLayer url={nucleiUrl} h={height} />}
         {showPins &&
           stops.map((s) =>
             s.region ? (
@@ -112,7 +158,7 @@ export function SlideViewer({ imageUrl, heatmapUrl, tissueMapUrl, width, height,
             <Marker
               key={s.key}
               position={toLatLng(s, height)}
-              icon={pinIcon(s, focus?.key === s.key)}
+              icon={pinIcon(s, focus?.key === s.key, organ)}
               eventHandlers={{ click: () => onSelect(s) }}
               zIndexOffset={s.region ? 100 : 0}
             >
@@ -162,18 +208,39 @@ export function SlideViewer({ imageUrl, heatmapUrl, tissueMapUrl, width, height,
         )}
         {overlay === 'tissue' && (
           <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-            {Object.entries(TISSUE).map(([k, t]) => (
-              <li key={k} className="flex items-center gap-1.5 truncate">
-                <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: t.color }} />
-                {t.label}
-              </li>
-            ))}
+            {classes.map((k) => {
+              const t = tissueInfo(k, organ)
+              return (
+                <li key={k} className="flex items-center gap-1.5 truncate" title={t.label}>
+                  <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: t.color }} />
+                  {t.label}
+                </li>
+              )
+            })}
           </ul>
         )}
         <label className="flex cursor-pointer items-center justify-between gap-2 border-t border-white/10 pt-2">
           <span>Guide markers ({stops.length})</span>
           <input type="checkbox" checked={showPins} onChange={(e) => setShowPins(e.target.checked)} className="accent-cyan-500" />
         </label>
+        {nucleiUrl && (
+          <div className="border-t border-white/10 pt-2">
+            <label className="flex cursor-pointer items-center justify-between gap-2">
+              <span>Cells{nucleiCount != null && ` (${nucleiCount.toLocaleString()})`}</span>
+              <input type="checkbox" checked={showCells} onChange={(e) => setShowCells(e.target.checked)} className="accent-cyan-500" />
+            </label>
+            {showCells && (
+              <ul className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] text-slate-300">
+                {NUCLEUS_TYPES.map((t) => (
+                  <li key={t.key} className="flex items-center gap-1.5 truncate">
+                    <span className="size-2 shrink-0 rounded-full border-2" style={{ borderColor: t.color }} />
+                    {t.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

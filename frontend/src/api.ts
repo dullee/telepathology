@@ -1,5 +1,5 @@
 export type Tier = 'critical' | 'high' | 'routine'
-export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed'
+export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed' | 'retake'
 
 export interface Region {
   id: number
@@ -39,6 +39,54 @@ export interface AnalysisResult {
   tiles: number
   device: string
   elapsed_ms: number
+  model?: string
+  model_label?: string
+  organ?: string
+  /** Class code -> display label for the model that produced this result (absent on old results). */
+  class_labels?: Record<string, string>
+  tumor_classes?: string[]
+  /** Present when several photos were stitched into one mosaic. */
+  fields?: { uploaded: number; stitched: number; downscale: number } | null
+  cells?: CellSummary | null
+}
+
+export type QualityStatus = 'pass' | 'warn' | 'reject'
+
+export interface QualityCheck {
+  name: string
+  label: string
+  status: QualityStatus
+  value: number
+  message: string
+}
+
+/** Pre-analysis photo quality gate (quality.json). */
+export interface QualityReport {
+  status: QualityStatus
+  checks: QualityCheck[]
+  /** Stitched cases: photos left out before stitching. */
+  dropped: { photo: number; reason: string }[]
+  forced: boolean
+}
+
+export type NucleusType = 'neoplastic' | 'inflammatory' | 'connective' | 'dead' | 'epithelial'
+
+export type CellSummary =
+  | { status: 'counting' }
+  | { status: 'failed'; error: string }
+  | {
+      status: 'done'
+      total: number
+      counts: Record<NucleusType, number>
+      fractions: Record<NucleusType, number>
+      per_mm2: number
+      tissue_mm2: number
+      elapsed_ms: number
+    }
+
+/** nuclei.json: [x, y, type] in display-image pixels; type 1-5 in NUCLEUS_TYPES order. */
+export interface NucleiFile {
+  points: [number, number, number][]
 }
 
 interface CaseBase {
@@ -56,9 +104,13 @@ interface CaseBase {
   notes: string
   error: string
   original_url: string
+  /** Every uploaded photo when the case was stitched from several. */
+  field_urls: string[]
+  quality: QualityReport | null
   image_url?: string
   heatmap_url?: string
   tissue_map_url?: string
+  nuclei_url?: string
 }
 
 export interface CaseSummary extends CaseBase {
@@ -73,9 +125,38 @@ export interface CaseDetail extends CaseBase {
 export interface Health {
   device: string
   model: string
+  model_label: string
   model_ready: boolean
   model_error: string
   classes: Record<string, string>
+}
+
+export interface ModelInfo {
+  id: string
+  label: string
+  organ: string
+  family: 'cnn' | 'foundation'
+  description: string
+  license: string
+  params: string
+  speed: 'fast' | 'medium' | 'slow'
+  download_gb: number
+  trained_on: string
+  classes: Record<string, string>
+  tumor_classes: string[]
+  validation: { val_accuracy?: number; val_accuracy_degraded?: number }
+  available: boolean
+  unavailable_reason: string
+  weights_cached: boolean
+}
+
+export interface ModelStatus {
+  active: string
+  /** Model currently in memory; differs from `active` while a switch is loading. */
+  loaded: string
+  loading: string
+  error: string
+  models: ModelInfo[]
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -98,5 +179,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  reanalyze: (id: number) => request<CaseDetail>(`/api/cases/${id}/reanalyze`, { method: 'POST' }),
+  models: () => request<ModelStatus>('/api/models'),
+  setModel: (id: string) =>
+    request<ModelStatus>('/api/models/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }),
+  reanalyze: (id: number, force = false) =>
+    request<CaseDetail>(`/api/cases/${id}/reanalyze${force ? '?force=true' : ''}`, { method: 'POST' }),
 }

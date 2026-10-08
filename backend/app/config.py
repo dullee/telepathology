@@ -8,6 +8,7 @@ DATA_DIR = Path(os.getenv("TELEPATH_DATA_DIR", BASE_DIR / "data"))
 MEDIA_DIR = DATA_DIR / "media"
 DB_URL = os.getenv("TELEPATH_DB_URL", f"sqlite:///{DATA_DIR / 'telepath.db'}")
 
+# Default classifier until one is picked in the dashboard. Options: app/inference/registry.py.
 MODEL_NAME = os.getenv("TELEPATH_MODEL", "resnet18-kather100k")
 # Output index order of the TIAToolbox kather100k weights
 # (tiatoolbox.models.dataset.info.KatherPatchDataset) -- not alphabetical.
@@ -24,18 +25,26 @@ CLASS_LABELS = {
     "TUM": "Tumor epithelium",
 }
 NON_TISSUE = {"ADI", "BACK"}
-# Tissue-map overlay colours; keep in sync with frontend/src/lib/tissue.ts.
+# Tissue-map overlay colours for every model's classes (codes shared across organs mean the same
+# kind of tissue); keep in sync with frontend/src/lib/tissue.ts.
 TISSUE_COLORS = {
     "TUM": (220, 38, 38),
+    "ACA": (220, 38, 38),
+    "SCC": (162, 28, 175),
     "DEB": (249, 115, 22),
+    "NEC": (249, 115, 22),
     "NORM": (16, 185, 129),
+    "NOR": (16, 185, 129),
     "STR": (244, 114, 182),
+    "FIB": (244, 114, 182),
     "MUS": (253, 164, 175),
     "LYM": (99, 102, 241),
+    "INF": (99, 102, 241),
     "MUC": (56, 189, 248),
+    "REA": (20, 184, 166),
+    "STE": (250, 204, 21),
 }
-# Reference spots shown in the guided tour (tumor is covered by region hotspots).
-LANDMARK_CLASSES = ["DEB", "NORM", "LYM", "STR", "MUS", "MUC"]
+# Guided-tour reference spots: one per non-tumor tissue class of the active model.
 LANDMARK_MIN_PROB = 0.6
 
 TILE = 224
@@ -44,6 +53,15 @@ BATCH_SIZE = int(os.getenv("TELEPATH_BATCH", 64))
 # Longest image side is resized to this before tiling (eyepiece photos are often 4000px+).
 MAX_SIDE = int(os.getenv("TELEPATH_MAX_SIDE", 2048))
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
+# Several overlapping photos of one slide are stitched into a mosaic (see inference/stitch.py).
+MAX_FIELDS = int(os.getenv("TELEPATH_MAX_FIELDS", 40))
+MOSAIC_MAX_SIDE = int(os.getenv("TELEPATH_MOSAIC_MAX_SIDE", 12000))
+# Microns per pixel of the analysed photo; a 20x objective photographed by phone is ~0.5.
+UM_PER_PX = float(os.getenv("TELEPATH_UM_PER_PX", 0.5))
+# Nucleus counting (HoVer-Net, trained at 0.25 µm/px) upscales the photo by this factor.
+CELL_SCALE = UM_PER_PX / 0.25
+CELL_COUNTING = os.getenv("TELEPATH_CELLS", "1") != "0"
+CELL_BATCH = int(os.getenv("TELEPATH_CELL_BATCH", 0))  # 0 = pick per device (see cells.py)
 
 # A tile is "suspicious" when P(tumor) exceeds this.
 TUMOR_THRESHOLD = 0.5
