@@ -135,6 +135,12 @@ active, e.g. `Edge engine · CUDA · NVIDIA GeForce RTX 4060`.
 To serve other machines on the clinic LAN, run `uvicorn ... --host 0.0.0.0` and
 `npm run dev -- --host`, or build the dashboard (`npm run build`) and serve `frontend/dist`.
 
+**Hosted dashboard:** https://pathtriage.vercel.app is built with `VITE_API_BASE=http://localhost:8000`,
+so it talks to the backend on whichever computer opens it. Start the backend, then open the site
+(Chrome, Edge or Firefox; allow local network access if asked). No `npm` step is needed on that
+machine. To redeploy after dashboard changes: `cd frontend && npx vercel deploy --prod`.
+`VITE_API_BASE` can instead point at any public backend URL (for example a Tailscale Funnel address).
+
 ## Models
 
 Click the engine pill in the dashboard header to switch models. The choice is saved to

@@ -159,13 +159,26 @@ export interface ModelStatus {
   models: ModelInfo[]
 }
 
+/**
+ * Backend origin, e.g. https://clinic-pc.tailnet.ts.net, when the dashboard is hosted apart from the
+ * backend (Vercel). Empty in development, where Vite proxies /api and /media to localhost.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/+$/, '')
+
+/** The hosted dashboard talks to a backend on the viewer's own computer (http://localhost:8000). */
+export const USES_LOCAL_BACKEND = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(API_BASE)
+
+/** The backend returns /media/... paths; point them at the backend origin too. */
+const absoluteMedia = (_key: string, value: unknown) =>
+  typeof value === 'string' && value.startsWith('/media/') ? API_BASE + value : value
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
+  const res = await fetch(API_BASE + url, init)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.detail ?? `${res.status} ${res.statusText}`)
   }
-  return res.json()
+  return JSON.parse(await res.text(), absoluteMedia)
 }
 
 export const api = {

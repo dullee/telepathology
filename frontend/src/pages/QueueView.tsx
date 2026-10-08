@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { api, type CaseSummary } from '../api.ts'
+import { api, type CaseSummary, USES_LOCAL_BACKEND } from '../api.ts'
 import { UploadPanel } from '../components/UploadPanel.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge, UrgencyBar } from '../components/UrgencyBadge.tsx'
 import { pct, timeAgo } from '../lib/format.ts'
@@ -101,6 +101,15 @@ export function QueueView() {
         {error && (
           <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
             Can't reach the triage engine: {error}
+            {USES_LOCAL_BACKEND && (
+              <p className="mt-1">
+                This site uses the backend on your own computer. Start it in the project folder with{' '}
+                <code className="rounded bg-red-100 px-1 dark:bg-red-900/50">
+                  cd backend &amp;&amp; uv run uvicorn app.main:app --port 8000
+                </code>
+                , then reload. Use Chrome, Edge or Firefox, and allow local network access if the browser asks.
+              </p>
+            )}
           </div>
         )}
 
