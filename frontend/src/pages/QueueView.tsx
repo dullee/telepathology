@@ -5,7 +5,7 @@ import { api, type CaseSummary, USES_LOCAL_BACKEND } from '../api.ts'
 import { DemoNotice } from '../components/DemoNotice.tsx'
 import { UploadPanel } from '../components/UploadPanel.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge, UrgencyBar } from '../components/UrgencyBadge.tsx'
-import { useDemoMode } from '../lib/demo.ts'
+import { isDemoCase, useDemoMode } from '../lib/demo.ts'
 import { pct, timeAgo } from '../lib/format.ts'
 import { usePolling } from '../lib/usePolling.ts'
 
@@ -145,7 +145,14 @@ export function QueueView() {
                     <TierBadge tier={c.status === 'failed' ? null : c.tier} />
                   </span>
                   <span className="order-1 min-w-0 md:order-none">
-                    <span className="block truncate font-medium">{c.patient_ref}</span>
+                    <span className="block truncate font-medium">
+                      {c.patient_ref}
+                      {isDemoCase(c.id) && !demo && (
+                        <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-900/50 dark:text-sky-200">
+                          Demo
+                        </span>
+                      )}
+                    </span>
                     <span className="block truncate text-xs text-slate-500">
                       {c.specimen || 'Specimen'} · {timeAgo(c.created_at)}
                     </span>

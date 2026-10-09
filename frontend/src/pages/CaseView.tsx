@@ -5,7 +5,7 @@ import { api, type CaseDetail, type CellSummary, type QualityReport } from '../a
 import { SlideViewer } from '../components/SlideViewer.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.tsx'
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
-import { useDemoMode } from '../lib/demo.ts'
+import { isDemoCase } from '../lib/demo.ts'
 import { buildStops, type GuideStop } from '../lib/guide.ts'
 import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 import { tissueInfo } from '../lib/tissue.ts'
@@ -25,7 +25,8 @@ export function CaseView() {
   const [c, setCase] = useState<CaseDetail | null>(null)
   const [error, setError] = useState('')
   const [focus, setFocus] = useState<GuideStop | null>(null)
-  const demo = useDemoMode()
+  // Demo cases are saved results: nothing to re-run.
+  const demo = isDemoCase(id!)
   const result = c?.result
   const stops = useMemo(() => (result ? buildStops(result) : []), [result])
 

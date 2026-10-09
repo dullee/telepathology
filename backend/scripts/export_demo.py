@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -19,12 +20,18 @@ import httpx
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-MEDIA = ROOT / "data" / "media"
+# Same data folder as the backend (TELEPATH_DATA_DIR).
+MEDIA = Path(os.getenv("TELEPATH_DATA_DIR", ROOT / "data")) / "media"
 OUT = ROOT.parent / "frontend" / "public" / "demo"
-# The six single colon photos, the three stitched colon cases, and one photo the quality gate rejects.
-DEFAULT_IDS = [1, 2, 3, 4, 5, 6, 16, 18, 19, 20]
+# The six single colon photos, the three stitched colon cases, two stitched lung cases (lung model),
+# and one photo the quality gate rejects.
+DEFAULT_IDS = [1, 2, 3, 4, 5, 6, 15, 16, 17, 18, 19, 20]
 # Case labels to replace, for cases uploaded during testing.
-RELABEL = {16: {"patient_ref": "KE-0447", "clinic": "Busia Sub-County Clinic", "specimen": "Lung biopsy"}}
+RELABEL = {
+    15: {"patient_ref": "UG-1236", "clinic": "Gulu Community Hospital", "specimen": "Lung biopsy (6 photos)"},
+    16: {"patient_ref": "KE-0447", "clinic": "Busia Sub-County Clinic", "specimen": "Lung biopsy"},
+    17: {"patient_ref": "TZ-0064", "clinic": "Moshi Outreach Unit", "specimen": "Lung biopsy (6 photos, 1 out of focus)"},
+}
 # Stitched cases' source photos are only shown as thumbnails; shrink them to keep the deploy small.
 FIELD_MAX_SIDE = 1024
 

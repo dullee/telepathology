@@ -1,4 +1,4 @@
-import { demoRequest, setDemoMode } from './lib/demo.ts'
+import { DEMO_READ_ONLY, demoRequest, isDemoCase, setDemoMode, sortQueue } from './lib/demo.ts'
 
 export type Tier ='critical' | 'high' | 'routine'
 export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed' | 'retake'
@@ -206,15 +206,23 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/api/health'),
-  listCases: (status = 'active') => request<CaseSummary[]>(`/api/cases?status=${status}`),
-  getCase: (id: number | string) => request<CaseDetail>(`/api/cases/${id}`),
+  /** The backend's queue with the demo cases mixed in (only the demo cases when no backend runs). */
+  listCases: async (status = 'active') => {
+    const url = `/api/cases?status=${status}`
+    const demo = demoRequest(url) as Promise<CaseSummary[]>
+    if (!(await backendUp)) return demo
+    const [live, demoCases] = await Promise.all([request<CaseSummary[]>(url), demo.catch(() => [])])
+    return sortQueue([...live, ...demoCases])
+  },
+  getCase: (id: number | string) =>
+    isDemoCase(id) ? (demoRequest(`/api/cases/${id}`) as Promise<CaseDetail>) : request<CaseDetail>(`/api/cases/${id}`),
   createCase: (form: FormData) => request<CaseDetail>('/api/cases', { method: 'POST', body: form }),
-  reviewCase: (id: number, body: { status?: Status; diagnosis?: string; notes?: string }) =>
-    request<CaseDetail>(`/api/cases/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
+  reviewCase: (id: number, body: { status?: Status; diagnosis?: string; notes?: string }) => {
+    const init = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    return isDemoCase(id)
+      ? (demoRequest(`/api/cases/${id}`, init) as Promise<CaseDetail>)
+      : request<CaseDetail>(`/api/cases/${id}`, init)
+  },
   models: () => request<ModelStatus>('/api/models'),
   setModel: (id: string) =>
     request<ModelStatus>('/api/models/active', {
@@ -223,5 +231,7 @@ export const api = {
       body: JSON.stringify({ id }),
     }),
   reanalyze: (id: number, force = false) =>
-    request<CaseDetail>(`/api/cases/${id}/reanalyze${force ? '?force=true' : ''}`, { method: 'POST' }),
+    isDemoCase(id)
+      ? Promise.reject(new Error(DEMO_READ_ONLY))
+      : request<CaseDetail>(`/api/cases/${id}/reanalyze${force ? '?force=true' : ''}`, { method: 'POST' }),
 }
