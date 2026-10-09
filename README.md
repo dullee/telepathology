@@ -172,6 +172,14 @@ machine. The Vercel project builds `frontend/` (its Root Directory) and redeploy
 `main`; `VITE_API_BASE` is set in the project's environment variables.
 `VITE_API_BASE` can instead point at any public backend URL (for example a Tailscale Funnel address).
 
+**Demo cases:** if no backend answers within 5 seconds, the hosted dashboard shows built-in demo cases:
+the six single colon photos, the three stitched cases and one photo rejected for a retake, each with its
+heatmap, tissue map and cell counts. You can review the demo cases, but changes reset on reload. Uploads
+need a backend. Once you start one, the page switches to it within 15 seconds. Add `?demo` to the address to
+show the demo even while a backend is running. The demo is a snapshot in `frontend/public/demo/`. To
+refresh it, run `uv run python scripts/export_demo.py` in `backend/` against a running backend that has
+the cases analyzed, then commit the result.
+
 ## Models
 
 Click the engine pill in the dashboard header to switch models. The choice is saved to

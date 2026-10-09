@@ -5,6 +5,7 @@ import { api, type CaseDetail, type CellSummary, type QualityReport } from '../a
 import { SlideViewer } from '../components/SlideViewer.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.tsx'
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
+import { useDemoMode } from '../lib/demo.ts'
 import { buildStops, type GuideStop } from '../lib/guide.ts'
 import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 import { tissueInfo } from '../lib/tissue.ts'
@@ -24,6 +25,7 @@ export function CaseView() {
   const [c, setCase] = useState<CaseDetail | null>(null)
   const [error, setError] = useState('')
   const [focus, setFocus] = useState<GuideStop | null>(null)
+  const demo = useDemoMode()
   const result = c?.result
   const stops = useMemo(() => (result ? buildStops(result) : []), [result])
 
@@ -134,11 +136,11 @@ export function CaseView() {
             <QualityPanel
               q={c.quality}
               retake={c.status === 'retake'}
-              onForce={() => api.reanalyze(c.id, true).then(setCase)}
+              onForce={demo ? undefined : () => api.reanalyze(c.id, true).then(setCase)}
             />
           )}
 
-          {c.status === 'failed' && (
+          {c.status === 'failed' && !demo && (
             <button
               onClick={() => api.reanalyze(c.id).then(setCase)}
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700"
@@ -170,14 +172,19 @@ export function CaseView() {
                 </dl>
                 <p className="mt-3 text-xs text-slate-500">
                   Triage aid only — the specialist makes the diagnosis. {r.model_label ?? 'ResNet-18 · Kather100k'} ·{' '}
-                  {r.tiles} tiles · {r.device} · {(r.elapsed_ms / 1000).toFixed(1)} s ·{' '}
-                  <button
-                    onClick={() => api.reanalyze(c.id).then(setCase)}
-                    className="text-cyan-700 hover:underline dark:text-cyan-400"
-                    title="Run again with the model currently selected in the header"
-                  >
-                    Re-analyze
-                  </button>
+                  {r.tiles} tiles · {r.device} · {(r.elapsed_ms / 1000).toFixed(1)} s
+                  {!demo && (
+                    <>
+                      {' '}·{' '}
+                      <button
+                        onClick={() => api.reanalyze(c.id).then(setCase)}
+                        className="text-cyan-700 hover:underline dark:text-cyan-400"
+                        title="Run again with the model currently selected in the header"
+                      >
+                        Re-analyze
+                      </button>
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -326,7 +333,7 @@ const QUALITY_TONE = {
 } as const
 
 /** Pre-analysis photo checks: why a photo needs retaking, or what to keep in mind about the result. */
-function QualityPanel({ q, retake, onForce }: { q: QualityReport; retake: boolean; onForce: () => void }) {
+function QualityPanel({ q, retake, onForce }: { q: QualityReport; retake: boolean; onForce?: () => void }) {
   const problems = q.checks.filter((ch) => ch.status !== 'pass')
   return (
     <section
@@ -369,7 +376,7 @@ function QualityPanel({ q, retake, onForce }: { q: QualityReport; retake: boolea
           ))}
         </ul>
       </details>
-      {retake && (
+      {retake && onForce && (
         <button
           onClick={onForce}
           className="mt-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"

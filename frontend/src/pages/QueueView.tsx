@@ -2,8 +2,10 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { api, type CaseSummary, USES_LOCAL_BACKEND } from '../api.ts'
+import { DemoNotice } from '../components/DemoNotice.tsx'
 import { UploadPanel } from '../components/UploadPanel.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge, UrgencyBar } from '../components/UrgencyBadge.tsx'
+import { useDemoMode } from '../lib/demo.ts'
 import { pct, timeAgo } from '../lib/format.ts'
 import { usePolling } from '../lib/usePolling.ts'
 
@@ -41,6 +43,7 @@ export function QueueView() {
   const [filter, setFilter] = useState<Filter>('active')
   const [error, setError] = useState('')
   const [, setNow] = useState(Date.now())
+  const demo = useDemoMode()
 
   const load = () =>
     api.listCases(filter).then(
@@ -97,6 +100,8 @@ export function QueueView() {
             <Stat label="Analyzing" value={counts.pending} tone="text-sky-600" />
           </div>
         )}
+
+        {demo && <DemoNotice />}
 
         {error && (
           <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -172,7 +177,14 @@ export function QueueView() {
           <p className="mb-3 text-xs text-slate-500">
             Photograph the slide through the eyepiece with the phone adapter. Analysis runs on this clinic's edge device.
           </p>
-          <UploadPanel onUploaded={load} />
+          {demo ? (
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+              Uploading needs the triage engine running on this computer. The demo cases in the queue show what
+              comes back.
+            </p>
+          ) : (
+            <UploadPanel onUploaded={load} />
+          )}
         </div>
       </aside>
     </main>

@@ -1,4 +1,6 @@
-export type Tier = 'critical' | 'high' | 'routine'
+import { demoRequest, setDemoMode } from './lib/demo.ts'
+
+export type Tier ='critical' | 'high' | 'routine'
 export type Status = 'queued' | 'analyzing' | 'ready' | 'reviewed' | 'failed' | 'retake'
 
 export interface Region {
@@ -172,7 +174,28 @@ export const USES_LOCAL_BACKEND = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
 const absoluteMedia = (_key: string, value: unknown) =>
   typeof value === 'string' && value.startsWith('/media/') ? API_BASE + value : value
 
+/** `?demo` in the address forces the built-in demo, e.g. to rehearse a presentation with a backend running. */
+export const FORCE_DEMO = new URLSearchParams(location.search).has('demo')
+
+/**
+ * Is the viewer's backend running? Checked once per visit, with a timeout so a pending
+ * local-network permission prompt doesn't leave the page loading. Without it, the hosted
+ * dashboard shows the built-in demo.
+ */
+const probe = () =>
+  fetch(API_BASE + '/api/health', { signal: AbortSignal.timeout(5000) }).then(
+    (r) => r.ok,
+    () => false,
+  )
+const backendUp: Promise<boolean> = FORCE_DEMO ? Promise.resolve(false) : USES_LOCAL_BACKEND ? probe() : Promise.resolve(true)
+backendUp.then((up) => setDemoMode(!up))
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  if (!(await backendUp)) {
+    // Switch to the live backend as soon as it is started (the header polls health).
+    if (url === '/api/health' && !FORCE_DEMO && (await probe())) location.reload()
+    return demoRequest(url, init) as Promise<T>
+  }
   const res = await fetch(API_BASE + url, init)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
