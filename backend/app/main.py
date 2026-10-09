@@ -10,7 +10,6 @@ from app import config
 from app.api.cases import router as cases_router
 from app.api.models import router as models_router
 from app.db import init_db
-from app.demo_cases import seed_demo_cases
 from app.inference import model as model_mgr
 from app.inference.device import describe, pick_device
 from app.worker import resume_interrupted
@@ -21,7 +20,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    seed_demo_cases()
     # Download/load weights in the background so the API is reachable immediately,
     # then pick up any cases a previous shutdown interrupted.
     def startup() -> None:

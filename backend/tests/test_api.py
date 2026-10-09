@@ -184,28 +184,3 @@ def test_restart_resumes_interrupted_cases(monkeypatch):
     resume_interrupted()
     with Session(engine) as session:
         assert session.get(Case, case_id).status == "ready"
-
-
-def test_demo_cases_fill_only_an_empty_queue(monkeypatch):
-    from sqlmodel import Session, delete, select
-
-    from app import config
-    from app.db import engine, init_db
-    from app.demo_cases import seed_demo_cases
-    from app.models import Case
-
-    monkeypatch.setattr(config, "DEMO_CASES", True)
-    init_db()
-    with Session(engine) as s:
-        s.exec(delete(Case))
-        s.commit()
-    seed_demo_cases()
-    seed_demo_cases()  # a second start adds nothing
-    with Session(engine) as s:
-        cases = s.exec(select(Case)).all()
-    assert len(cases) == 10
-    assert all((config.MEDIA_DIR / str(c.id) / c.filename).exists() for c in cases)
-    assert all(c.result["cells"]["status"] == "done" for c in cases if c.status == "ready")
-    with Session(engine) as s:
-        s.exec(delete(Case))
-        s.commit()
