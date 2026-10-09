@@ -109,7 +109,37 @@ backend starts again.
 
 ## Run it
 
-Requirements: [uv](https://docs.astral.sh/uv/) and Node 20+.
+### First-time setup on a new computer
+
+The backend needs [uv](https://docs.astral.sh/uv/), which also installs the right Python (3.11 or
+3.12) by itself. The dashboard needs Node 20+, but only if you run it locally instead of using the
+hosted dashboard (see below). Install them once:
+
+1. **Git**: macOS: run `xcode-select --install`. Windows: install [Git for Windows](https://git-scm.com/download/win).
+   Linux: `sudo apt install git`.
+2. **uv**:
+   - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   - Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+
+   Then close and reopen the terminal, and check that `uv --version` prints a version.
+3. **Node 20+** (local dashboard only): install the LTS version from [nodejs.org](https://nodejs.org/).
+   Then reopen the terminal, and check that `node --version` prints v20 or newer.
+4. **Get the code**: `git clone <repo URL>`, then `cd` into the folder.
+5. **Windows/Linux with an NVIDIA GPU**: install a current NVIDIA driver (CUDA 12.6 or newer; check
+   with `nvidia-smi`). You don't need the CUDA toolkit, because PyTorch brings its own.
+
+Then follow the steps below. The first `uv sync` downloads PyTorch and the other packages (a few GB,
+so expect 5–15 minutes), and the first analysis downloads the model weights.
+
+**Troubleshooting**
+- `uv: command not found`: reopen the terminal so it picks up the new PATH, or run
+  `source $HOME/.local/bin/env` (macOS/Linux).
+- `Failed to spawn: uvicorn` after copying or moving the project folder: the virtual environment
+  remembers its old location. In `backend/`, delete it with `rm -rf .venv` (Windows:
+  `rmdir /s /q .venv`), then run `uv sync` again. Don't copy `.venv` or `node_modules` between computers.
+- `npm: command not found`: Node isn't installed. Install it (step 3), or use the hosted dashboard.
+
+### Start it
 
 ```bash
 # Backend (first run downloads PyTorch and the model weights)
