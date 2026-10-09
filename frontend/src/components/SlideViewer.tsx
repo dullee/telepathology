@@ -1,10 +1,9 @@
-import L, { type LatLngBoundsExpression, type LatLngExpression } from 'leaflet'
+import L, { type LatLngBoundsExpression } from 'leaflet'
 import { useEffect, useMemo, useState } from 'react'
-import { Circle, ImageOverlay, MapContainer, Marker, Rectangle, Tooltip, useMap } from 'react-leaflet'
+import { ImageOverlay, MapContainer, Rectangle, Tooltip, useMap } from 'react-leaflet'
 
 import type { NucleiFile, Region } from '../api.ts'
 import { pct } from '../lib/format.ts'
-import type { GuideStop } from '../lib/guide.ts'
 import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 import { tissueInfo } from '../lib/tissue.ts'
 
@@ -16,9 +15,8 @@ interface Props {
   tissueMapUrl?: string
   width: number
   height: number
-  stops: GuideStop[]
-  focus: GuideStop | null
-  onSelect: (s: GuideStop) => void
+  /** Suspicious regions, outlined on the slide. */
+  regions: Region[]
   /** Tissue classes of the model that produced the result, for the tissue-map legend. */
   classes: string[]
   organ?: string
@@ -34,31 +32,13 @@ function toBounds(r: Region, h: number): LatLngBoundsExpression {
   ]
 }
 
-const toLatLng = (s: GuideStop, h: number): LatLngExpression => [h - s.y, s.x]
-
-/** Radius of the "look here" circle: about one model tile, the area the AI judged. */
-const LOOK_RADIUS = 112
-
-function pinIcon(stop: GuideStop, focused: boolean, organ?: string) {
-  const color = tissueInfo(stop.cls, organ).color
-  const label = stop.region ? String(stop.region.id) : ''
-  return L.divIcon({
-    className: '',
-    html: `<span class="guide-pin${stop.region ? '' : ' guide-pin--example'}${focused ? ' guide-pin--focus' : ''}" style="--pin:${color}">${label}</span>`,
-    iconSize: [0, 0],
-  })
-}
-
-function Fit({ bounds, focus, h }: { bounds: L.LatLngBounds; focus: GuideStop | null; h: number }) {
+function Fit({ bounds }: { bounds: L.LatLngBounds }) {
   const map = useMap()
   useEffect(() => {
     map.fitBounds(bounds)
     map.setMinZoom(map.getBoundsZoom(bounds) - 1)
     map.setMaxBounds(bounds.pad(0.5))
   }, [map, bounds])
-  useEffect(() => {
-    if (focus) map.flyTo(toLatLng(focus, h), Math.max(map.getZoom(), 1.25), { duration: 0.6 })
-  }, [map, focus, h])
   return null
 }
 
@@ -93,9 +73,7 @@ export function SlideViewer({
   tissueMapUrl,
   width,
   height,
-  stops,
-  focus,
-  onSelect,
+  regions,
   classes,
   organ,
   nucleiUrl,
@@ -104,7 +82,7 @@ export function SlideViewer({
   const [overlay, setOverlay] = useState<Overlay>('heat')
   const [showCells, setShowCells] = useState(false)
   const [opacity, setOpacity] = useState(0.55)
-  const [showPins, setShowPins] = useState(true)
+  const [showRegions, setShowRegions] = useState(true)
   const bounds = useMemo(() => L.latLngBounds([0, 0], [height, width]), [width, height])
   const overlayUrl = overlay === 'heat' ? heatmapUrl : overlay === 'tissue' ? tissueMapUrl : undefined
   const options: [Overlay, string, boolean][] = [
@@ -125,48 +103,22 @@ export function SlideViewer({
         attributionControl={false}
         className="size-full"
       >
-        <Fit bounds={bounds} focus={focus} h={height} />
+        <Fit bounds={bounds} />
         <ImageOverlay url={imageUrl} bounds={bounds} />
         {overlayUrl && <ImageOverlay key={overlay} url={overlayUrl} bounds={bounds} opacity={opacity} zIndex={2} />}
         {nucleiUrl && showCells && <NucleiLayer url={nucleiUrl} h={height} />}
-        {showPins &&
-          stops.map((s) =>
-            s.region ? (
-              <Rectangle
-                key={`box-${s.key}`}
-                bounds={toBounds(s.region, height)}
-                eventHandlers={{ click: () => onSelect(s) }}
-                pathOptions={{
-                  color: focus?.key === s.key ? '#ffffff' : '#22d3ee',
-                  weight: focus?.key === s.key ? 3 : 2,
-                  dashArray: focus?.key === s.key ? undefined : '6 4',
-                  fillOpacity: 0,
-                }}
-              />
-            ) : null,
-          )}
-        {focus && (
-          <Circle
-            center={toLatLng(focus, height)}
-            radius={LOOK_RADIUS}
-            interactive={false}
-            pathOptions={{ color: '#ffffff', weight: 2, dashArray: '4 4', fillOpacity: 0 }}
-          />
-        )}
-        {showPins &&
-          stops.map((s) => (
-            <Marker
-              key={s.key}
-              position={toLatLng(s, height)}
-              icon={pinIcon(s, focus?.key === s.key, organ)}
-              eventHandlers={{ click: () => onSelect(s) }}
-              zIndexOffset={s.region ? 100 : 0}
+        {showRegions &&
+          regions.map((r) => (
+            <Rectangle
+              key={r.id}
+              bounds={toBounds(r, height)}
+              pathOptions={{ color: '#22d3ee', weight: 2, dashArray: '6 4', fillOpacity: 0 }}
             >
-              <Tooltip direction="top" offset={[0, -14]}>
-                <strong>{s.title}</strong> · AI confidence {pct(s.prob)}
-                {s.region && <> · {pct(s.region.area_fraction, 1)} of tissue</>}
+              <Tooltip sticky>
+                <strong>Suspicious region {r.id}</strong> · AI confidence {pct(r.max_prob)} ·{' '}
+                {pct(r.area_fraction, 1)} of tissue
               </Tooltip>
-            </Marker>
+            </Rectangle>
           ))}
       </MapContainer>
 
@@ -219,10 +171,17 @@ export function SlideViewer({
             })}
           </ul>
         )}
-        <label className="flex cursor-pointer items-center justify-between gap-2 border-t border-white/10 pt-2">
-          <span>Guide markers ({stops.length})</span>
-          <input type="checkbox" checked={showPins} onChange={(e) => setShowPins(e.target.checked)} className="accent-cyan-500" />
-        </label>
+        {regions.length > 0 && (
+          <label className="flex cursor-pointer items-center justify-between gap-2 border-t border-white/10 pt-2">
+            <span>Suspicious regions ({regions.length})</span>
+            <input
+              type="checkbox"
+              checked={showRegions}
+              onChange={(e) => setShowRegions(e.target.checked)}
+              className="accent-cyan-500"
+            />
+          </label>
+        )}
         {nucleiUrl && (
           <div className="border-t border-white/10 pt-2">
             <label className="flex cursor-pointer items-center justify-between gap-2">

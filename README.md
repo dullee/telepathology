@@ -34,10 +34,10 @@ queue then puts the highest-risk patients in front of remote pathologists first.
    `100 × (0.5·lesion burden + 0.3·peak tumor confidence + 0.2·largest region)`, plus up to
    +10 for tumor-associated necrosis. Tiers: **Critical ≥ 70**, **High ≥ 40**, **Routine** otherwise.
    Weights and thresholds live in [`backend/app/config.py`](backend/app/config.py).
-9. **Guide the viewer**: the clearest example of each other tissue type the active model knows (normal
-   mucosa, necrosis, lymphocytes, … or, for liver, fibrosis, steatosis, …) is saved as a landmark, and a
-   colour-coded tissue-type map is rendered. The case page's "What to look at" tour visits each hotspot and landmark and lists the visual clues to check,
-   so non-specialists can follow a demo.
+9. **Map the tissue**: a colour-coded tissue-type map is rendered (normal mucosa, necrosis,
+   lymphocytes, … or, for liver, fibrosis, steatosis, …), and the case page outlines each suspicious
+   region on the slide. The clearest example of each other tissue type is also saved as a landmark in
+   the result, but the dashboard doesn't show it.
 10. **Count cells** (after the case is already in the queue): HoVer-Net finds and types every nucleus
    (see [Cell counting](#cell-counting)).
 

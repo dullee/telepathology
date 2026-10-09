@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { api, type CaseDetail, type CellSummary, type QualityReport } from '../api.ts'
@@ -6,7 +6,6 @@ import { SlideViewer } from '../components/SlideViewer.tsx'
 import { StatusLabel, TIER_STYLE, TierBadge } from '../components/UrgencyBadge.tsx'
 import { parseDate, pct, timeAgo } from '../lib/format.ts'
 import { isDemoCase } from '../lib/demo.ts'
-import { buildStops, type GuideStop } from '../lib/guide.ts'
 import { NUCLEUS_TYPES } from '../lib/nuclei.ts'
 import { tissueInfo } from '../lib/tissue.ts'
 import { usePolling } from '../lib/usePolling.ts'
@@ -24,11 +23,8 @@ export function CaseView() {
   const navigate = useNavigate()
   const [c, setCase] = useState<CaseDetail | null>(null)
   const [error, setError] = useState('')
-  const [focus, setFocus] = useState<GuideStop | null>(null)
   // Demo cases are saved results: nothing to re-run.
   const demo = isDemoCase(id!)
-  const result = c?.result
-  const stops = useMemo(() => (result ? buildStops(result) : []), [result])
 
   const pending =
     !c || c.status === 'queued' || c.status === 'analyzing' || c.result?.cells?.status === 'counting'
@@ -68,9 +64,7 @@ export function CaseView() {
             tissueMapUrl={c.tissue_map_url}
             width={r.width}
             height={r.height}
-            stops={stops}
-            focus={focus}
-            onSelect={setFocus}
+            regions={r.regions}
             classes={Object.keys(r.class_labels ?? r.composition)}
             organ={organ}
             nucleiUrl={c.nuclei_url}
@@ -189,8 +183,6 @@ export function CaseView() {
                 </p>
               </div>
 
-              <GuideTour stops={stops} focus={focus} onSelect={setFocus} hasRegions={r.regions.length > 0} organ={organ} />
-
               <section>
                 <h2 className="mb-2 text-sm font-semibold">Tissue composition</h2>
                 <div className="mb-2 flex h-3 overflow-hidden rounded-full">
@@ -223,106 +215,6 @@ export function CaseView() {
         </div>
       </aside>
     </main>
-  )
-}
-
-function GuideTour({
-  stops,
-  focus,
-  onSelect,
-  hasRegions,
-  organ,
-}: {
-  stops: GuideStop[]
-  focus: GuideStop | null
-  onSelect: (s: GuideStop) => void
-  hasRegions: boolean
-  organ?: string
-}) {
-  const i = focus ? stops.findIndex((s) => s.key === focus.key) : -1
-  const info = focus ? tissueInfo(focus.cls, organ) : null
-  const normal = stops.find((s) => s.cls === 'NORM' || s.cls === 'NOR')
-
-  return (
-    <section>
-      <h2 className="text-sm font-semibold">What to look at</h2>
-      <p className="mb-2 mt-0.5 text-xs text-slate-500">
-        {hasRegions ? 'Numbered pins mark the most suspicious spots. ' : 'No region crossed the tumor threshold. '}
-        Small dots mark reference examples of other tissue. The AI judges small squares of tissue, not single cells,
-        so check the clues inside the dashed circle.
-      </p>
-
-      {focus && info ? (
-        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-semibold">{focus.title}</h3>
-            <span className="text-xs tabular-nums text-slate-500">
-              {i + 1} of {stops.length}
-            </span>
-          </div>
-          <p className="mt-1 flex items-center gap-1.5 text-xs">
-            <span className="size-2.5 rounded-sm" style={{ backgroundColor: info.color }} />
-            AI reads this as <strong>{info.label}</strong> · {pct(focus.prob)} confident
-          </p>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{info.what}</p>
-          <h4 className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Look for</h4>
-          <ul className="mt-1 list-disc space-y-1 pl-4 text-sm">
-            {info.lookFor.map((clue) => (
-              <li key={clue}>{clue}</li>
-            ))}
-          </ul>
-          {focus.region && normal && (
-            <p className="mt-2 text-xs text-slate-500">
-              Tip: jump to the {tissueInfo(normal.cls, organ).label.toLowerCase()} example to compare the two.
-            </p>
-          )}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              disabled={i <= 0}
-              onClick={() => onSelect(stops[i - 1])}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700"
-            >
-              ← Previous
-            </button>
-            <button
-              disabled={i >= stops.length - 1}
-              onClick={() => onSelect(stops[i + 1])}
-              className="rounded-md bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-40"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      ) : (
-        stops.length > 0 && (
-          <button
-            onClick={() => onSelect(stops[0])}
-            className="w-full rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-800"
-          >
-            Start guided tour ({stops.length} stops)
-          </button>
-        )
-      )}
-
-      <ol className="mt-2 space-y-1">
-        {stops.map((s) => (
-          <li key={s.key}>
-            <button
-              onClick={() => onSelect(s)}
-              className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition ${
-                focus?.key === s.key
-                  ? 'bg-cyan-700 text-white'
-                  : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: tissueInfo(s.cls, organ).color }} />
-              <span className="flex-1 truncate font-medium">{s.title}</span>
-              <span className="tabular-nums opacity-80">{pct(s.prob)}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-    </section>
   )
 }
 
