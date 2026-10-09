@@ -62,6 +62,8 @@ UM_PER_PX = float(os.getenv("TELEPATH_UM_PER_PX", 0.5))
 CELL_SCALE = UM_PER_PX / 0.25
 CELL_COUNTING = os.getenv("TELEPATH_CELLS", "1") != "0"
 CELL_BATCH = int(os.getenv("TELEPATH_CELL_BATCH", 0))  # 0 = pick per device (see cells.py)
+# Fill an empty queue with the dashboard's demo cases on startup (see demo_cases.py).
+DEMO_CASES = os.getenv("TELEPATH_DEMO_CASES", "1") != "0"
 
 # A tile is "suspicious" when P(tumor) exceeds this.
 TUMOR_THRESHOLD = 0.5

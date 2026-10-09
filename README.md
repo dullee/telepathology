@@ -147,9 +147,10 @@ cd backend
 uv sync
 uv run uvicorn app.main:app --port 8000
 
-# Demo data: builds 6 eyepiece-style photos plus 3 stitched cases (9, 6 and 6 overlapping photos,
-# one of them deliberately out of focus) from real Kather CRC-VAL-HE-7K patches
-# and uploads them. Patches are range-requested from Zenodo; the first run takes a few minutes.
+# The queue starts with the analyzed demo cases (see "Demo cases" below). To upload and analyze
+# the demo photos again: builds 6 eyepiece-style photos plus 3 stitched cases (9, 6 and 6 overlapping
+# photos, one of them deliberately out of focus) from real Kather CRC-VAL-HE-7K patches and uploads
+# them. Patches are range-requested from Zenodo; the first run takes a few minutes. Optional.
 uv run python scripts/fetch_samples.py --seed
 
 # Dashboard (new terminal), then open http://localhost:5173
@@ -176,7 +177,12 @@ machine. The Vercel project builds `frontend/` (its Root Directory) and redeploy
 the six single colon photos, the three stitched cases and one photo rejected for a retake, each with its
 heatmap, tissue map and cell counts. You can review the demo cases, but changes reset on reload. Uploads
 need a backend. Once you start one, the page switches to it within 15 seconds. Add `?demo` to the address to
-show the demo even while a backend is running. The demo is a snapshot in `frontend/public/demo/`. To
+show the demo even while a backend is running.
+
+The backend starts with the same cases: when its database has no cases, it adds the demo cases on
+startup, with their results and the full-size photos from `backend/samples/`, so you can review or
+re-analyze them like any upload. Set `TELEPATH_DEMO_CASES=0` to start with an empty queue instead. To
+start over, stop the backend and delete `backend/data/telepath.db` and `backend/data/media/`. The demo is a snapshot in `frontend/public/demo/`. To
 refresh it, run `uv run python scripts/export_demo.py` in `backend/` against a running backend that has
 the cases analyzed, then commit the result.
 
